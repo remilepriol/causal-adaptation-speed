@@ -69,8 +69,8 @@ class Simplex:
     def show_func(self, baryfunc):
         values = baryfunc(self.barycentrics)
         self.show_borders()
-        plt.tripcolor(self.trimesh, values)
-        plt.colorbar()
+        clevels = plt.tricontour(self.trimesh, values)
+        plt.clabel(clevels)
         
     def constraint_line(self,eps,color='r'):
         """Plot the line of equation $q_1-q_2=eps$"""
