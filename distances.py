@@ -48,9 +48,19 @@ def categorical_distances_cause(k, n, concentration=1):
     """
 
     # sample mechanisms
-    pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-    tpa = np.random.dirichlet(concentration * np.ones(k), size=n)  # transfer / intervention
-    pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
+    joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
+    pa = np.sum(joint, axis=1)
+    pba = joint / pa[:, None, :]
+
+    tpa = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k)).sum(
+        axis=1)
+
+    # pb = np.sum(joint, axis=2)
+    # pab = joint / pb[:, :, None]
+
+    # pa = np.random.dirichlet(concentration * np.ones(k), size=n)
+    # tpa = np.random.dirichlet(concentration * np.ones(k), size=n)  # transfer / intervention
+    # pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
 
     # evaluate anticausal probabilities
     pb, pab = causal2anti(pa, pba)
@@ -97,13 +107,18 @@ def categorical_distances_effect(k, n, concentration=1):
     """
 
     # sample causal mechanisms
-    pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-    pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
-    # evaluate anticausal probabilities
+    joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
+    pa = np.sum(joint, axis=1)
+    pba = joint / pa[:, None, :]
+
+    # pa = np.random.dirichlet(concentration * np.ones(k), size=n)
+    # pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
+    # # evaluate anticausal probabilities
     pb, pab = causal2anti(pa, pba)
 
     # intervention on the effect. tp = transfer distribution. tp(a,b) = tp(a)*tp(b)
-    tpb = np.random.dirichlet(concentration * np.ones(k), size=n)
+    tpb = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k)).sum(
+        axis=1)
     tpa = pa
     tpba = np.expand_dims(tpb, axis=1)
     tpab = np.expand_dims(tpa, axis=1)
@@ -153,7 +168,7 @@ class ConditionalGaussian():
     """
     addfreedom = 10
 
-    def __init__(self, dim, mua=None, cova=None, linear=None, bias=None, covcond=None,
+    def __init__(self, dim, mua=None, cova=None, linear=None, bias=None, condcov=None,
                  etaa=None, preca=None, natlinear=None, natbias=None, preccond=None):
         self.dim = dim
         self.eye = np.eye(dim)
@@ -164,30 +179,81 @@ class ConditionalGaussian():
 
         self.linear = self.eye if linear is None else linear
         self.bias = np.zeros(dim) if bias is None else bias
-        self.covcond = self.eye if covcond is None else covcond
+        self.condcov = self.eye if condcov is None else condcov
 
         # natural parameters
         self.preca = np.linalg.inv(self.cova) if preca is None else preca
         self.etaa = np.dot(self.preca, self.mua) if etaa is None else etaa
 
-        self.preccond = np.linalg.inv(self.covcond) if preccond is None else preccond
+        self.preccond = np.linalg.inv(self.condcov) if preccond is None else preccond
         self.natlinear = np.dot(self.preccond, self.linear) if natlinear is None else natlinear
         self.natbias = np.dot(self.preccond, self.bias) if natbias is None else natbias
 
-    @staticmethod
-    def random(dim):
-        """Return a random ConditionalGaussian."""
-        covariance_distribution = scipy.stats.invwishart(
-            df=dim + ConditionalGaussian.addfreedom, scale=np.eye(dim))
+    def joint_parameters(self):
+        mub = np.dot(self.linear, self.mua) + self.bias
+        mean = np.concatenate([self.mua, mub], axis=0)
 
-        mua = np.random.randn(dim)
-        cova = covariance_distribution.rvs()
+        crosscov = np.dot(self.cova, self.linear.T)
+        covariance = np.zeros([2 * self.dim, 2 * self.dim])
+        covariance[:self.dim, :self.dim] = self.cova
+        covariance[self.dim:, :self.dim] = crosscov.T
+        covariance[:self.dim, :self.dim:] = crosscov
+        covariance[self.dim:, self.dim:] = self.condcov + np.linalg.multi_dot([
+            self.linear, self.cova, self.linear])
 
-        linear = np.random.randn(dim, dim)
-        bias = np.random.randn(dim)
-        covcond = covariance_distribution.rvs()
+        return mean, covariance
 
-        return ConditionalGaussian(dim, mua, cova, linear, bias, covcond)
+    @classmethod
+    def from_joint(cls, mean, covariance):
+        dim = mean.shape[0] / 2
+
+        # parameters of marginal on A
+        mua = mean[:dim]
+        cova = covariance[:dim, :dim]
+        preca = np.linalg.inv(cova)
+
+        # intermediate values required for calculus
+        mub = mean[dim:]
+        covb = covariance[dim:, dim:]
+        crosscov = covariance[:dim, dim:]
+
+        # parameters of conditional
+        linear = np.dot(crosscov.T, preca)
+        bias = mub - np.dot(linear, mua)
+        covcond = covb - np.dot(linear, np.dot(cova, linear.T))
+
+        return cls(dim, mua, cova, linear, bias, covcond, preca=preca)
+
+    @classmethod
+    def random(cls, dim, symmetric=False):
+        """Return a random ConditionalGaussian where each variable has dimension dim.
+
+        If  symmetric is False, then sample each parameters independently.
+        Else ensure that cause and effect distributions are sampled similarly
+        by sampling the joint and then computing the conditional parameters.
+
+        """
+        if not symmetric:
+            covariance_distribution = scipy.stats.invwishart(
+                df=dim + cls.addfreedom, scale=np.eye(dim))
+
+            # parameters of marginal on A
+            mua = np.random.randn(dim)
+            cova = covariance_distribution.rvs()
+
+            # parameters of conditional
+            linear = np.random.randn(dim, dim)
+            bias = np.random.randn(dim)
+            covcond = covariance_distribution.rvs()
+
+            return cls(dim, mua, cova, linear, bias, covcond)
+
+        else:
+            mean = np.random.randn(2 * dim)
+            covariance = scipy.stats.invwishart(
+                df=2 * (dim + cls.addfreedom), scale=np.eye(2 * dim)).rvs()
+
+            return cls.from_joint(mean, covariance)
 
     def intervene_on_cause(self):
         """Random intervention on the mean parameters of the cause A"""
@@ -196,7 +262,7 @@ class ConditionalGaussian():
             df=self.dim + ConditionalGaussian.addfreedom, scale=self.eye).rvs()
 
         return ConditionalGaussian(
-            self.dim, mua, cova, self.linear, self.bias, self.covcond,
+            self.dim, mua, cova, self.linear, self.bias, self.condcov,
             natlinear=self.natlinear, natbias=self.natbias, preccond=self.preccond
         )
 
@@ -209,13 +275,13 @@ class ConditionalGaussian():
         return ConditionalGaussian(
             self.dim, self.mua, self.cova, etaa=self.etaa, preca=self.preca,
             linear=np.zeros_like(self.linear), natlinear=np.zeros_like(self.natlinear),
-            bias=mub, covcond=covb
+            bias=mub, condcov=covb
         )
 
     def reverse(self):
         """Return the ConditionalGaussian from B to A."""
         mub = np.dot(self.linear, self.mua) + self.bias
-        covb = self.covcond + np.dot(self.linear, np.dot(self.cova, self.linear))
+        covb = self.condcov + np.dot(self.linear, np.dot(self.cova, self.linear))
 
         natlinear = self.natlinear.T
         natbias = self.etaa - np.dot(natlinear, self.bias)
@@ -226,7 +292,7 @@ class ConditionalGaussian():
         bias = np.dot(covcond, natbias)
 
         return ConditionalGaussian(self.dim, mua=mub, cova=covb,
-                                   linear=linear, bias=bias, covcond=covcond,
+                                   linear=linear, bias=bias, condcov=covcond,
                                    natlinear=natlinear, natbias=natbias, preccond=preccond)
 
     def squared_distances(self, other):
@@ -236,7 +302,7 @@ class ConditionalGaussian():
                 + np.sum((self.cova - other.cova) ** 2)
                 + np.sum((self.linear - other.linear) ** 2)
                 + np.sum((self.bias - other.bias) ** 2)
-                + np.sum((self.covcond - other.covcond) ** 2)
+                + np.sum((self.condcov - other.covcond) ** 2)
         )
 
         natdist = (
@@ -249,22 +315,39 @@ class ConditionalGaussian():
 
         return meandist, natdist
 
+    def sample(self, n):
+        aa = np.random.multivariate_normal(self.mua, self.cova, size=n)
+        bb = np.dot(aa, self.linear.T) \
+             + np.random.multivariate_normal(self.bias, self.condcov, size=n)
+        return aa, bb
 
-a = ConditionalGaussian.random(2)
+    def encode(self, matrix):
+        mean, covariance = self.joint_parameters()
+        newmean = np.dot(matrix, mean)
+        newcovariance = np.linalg.multi_dot([
+            matrix, covariance, matrix.T
+        ])
+
+        return ConditionalGaussian.from_joint(newmean, newcovariance)
+
+
+a = ConditionalGaussian.random(2, symmetric=False)
+a = ConditionalGaussian.random(2, symmetric=True)
 a.intervene_on_cause()
 a.intervene_on_effect()
 b = a.reverse()
 a.squared_distances(b)
+a.sample(10)
 
 
-def gaussian_distances(k, n, intervention='cause'):
+def gaussian_distances(k, n, intervention='cause', symmetric=False):
     """Sample  n conditional gaussians between cause and effect of dimension k
     and evaluate the distance after intervention between causal and anticausal models."""
 
     ans = np.zeros([n, 6])
     for i in range(n):
         # sample mechanisms
-        original = ConditionalGaussian.random(k)
+        original = ConditionalGaussian.random(k, symmetric)
         revorig = original.reverse()
 
         if intervention == 'cause':
