@@ -1,3 +1,8 @@
+import numpy as np
+import scipy
+import scipy.stats
+
+
 class ConditionalGaussian():
     """Joint Gaussian distribution between a cause variable A and an effect variable B.
 
@@ -46,7 +51,7 @@ class ConditionalGaussian():
 
     @classmethod
     def from_joint(cls, mean, covariance):
-        dim = mean.shape[0] / 2
+        dim = int(mean.shape[0] / 2)
 
         # parameters of marginal on A
         mua = mean[:dim]
@@ -143,7 +148,7 @@ class ConditionalGaussian():
                 + np.sum((self.cova - other.cova) ** 2)
                 + np.sum((self.linear - other.linear) ** 2)
                 + np.sum((self.bias - other.bias) ** 2)
-                + np.sum((self.condcov - other.covcond) ** 2)
+                + np.sum((self.condcov - other.condcov) ** 2)
         )
 
         natdist = (
@@ -172,17 +177,20 @@ class ConditionalGaussian():
         return ConditionalGaussian.from_joint(newmean, newcovariance)
 
 
-a = ConditionalGaussian.random(2, symmetric=False)
-a = ConditionalGaussian.random(2, symmetric=True)
+dim = 2
+a = ConditionalGaussian.random(dim, symmetric=False)
+a = ConditionalGaussian.random(dim, symmetric=True)
 a.intervene_on_cause()
 a.intervene_on_effect()
 b = a.reverse()
 a.squared_distances(b)
 a.sample(10)
+transform = scipy.stats.ortho_group.rvs(2 * dim)
+c = a.encode(transform)
 
 
 def gaussian_distances(k, n, intervention='cause', symmetric=False):
-    """Sample  n conditional gaussians between cause and effect of dimension k
+    """Sample  n conditional Gaussians between cause and effect of dimension k
     and evaluate the distance after intervention between causal and anticausal models."""
 
     ans = np.zeros([n, 6])
@@ -207,3 +215,39 @@ def gaussian_distances(k, n, intervention='cause', symmetric=False):
 
 
 gaussian_distances(3, 4)
+
+
+def transform_distances(k, n, m, intervention='cause'):
+    """ Evaluate distance induced by interventions and orthonormal transformations.
+
+    Sample  n conditional Gaussians between cause and effect of dimension k.
+    For each of these reference distribution, sample an intervention.
+    Sample m orthonormal transformation of dimension 2k.
+    Get the n*(m+2) transformed distribution for reference and transfer distributions
+    +2 because we want to see the values of causal and anticausal models.
+    Evaluate the distance after intervention in transformed and non-trnasformed spaces.
+    """
+
+    transformers = scipy.stats.ortho_group.rvs(dim=2 * k, size=m)
+    ans = np.zeros([n, m + 2, 2])
+    for i in range(n):
+        # sample mechanisms
+        original = ConditionalGaussian.random(k, symmetric=True)
+        transformed = [original.reverse()] + [original.encode(t) for t in transformers]
+
+        if intervention == 'cause':
+            transfer = original.intervene_on_cause()
+        else:  # intervention on effect
+            transfer = original.intervene_on_effect()
+        transformed_transfer = [transfer.reverse()] + [transfer.encode(t) for t in transformers]
+
+        distances = [original.squared_distances(transfer)]
+        distances += [d.squared_distances(dt)
+                      for d, dt in zip(transformed, transformed_transfer)]
+
+        ans[i] = np.array(distances)
+
+    return ans
+
+
+transform_distances(3, 4, 5)

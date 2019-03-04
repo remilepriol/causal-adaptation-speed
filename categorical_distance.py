@@ -1,6 +1,4 @@
 import numpy as np
-import scipy
-import scipy.stats
 
 
 def causal2anti(pa, cond_pba):
