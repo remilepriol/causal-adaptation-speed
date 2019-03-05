@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+import scipy.linalg
 import scipy.stats
 
 
@@ -217,7 +218,7 @@ def gaussian_distances(k, n, intervention='cause', symmetric=False):
 gaussian_distances(3, 4)
 
 
-def transform_distances(k, n, m, intervention='cause'):
+def transform_distances(k, n, m, intervention='cause', transformation='orthonormal'):
     """ Evaluate distance induced by interventions and orthonormal transformations.
 
     Sample  n conditional Gaussians between cause and effect of dimension k.
@@ -228,7 +229,14 @@ def transform_distances(k, n, m, intervention='cause'):
     Evaluate the distance after intervention in transformed and non-trnasformed spaces.
     """
 
-    transformers = scipy.stats.ortho_group.rvs(dim=2 * k, size=m)
+    if transformation == 'orthonormal':
+        transformers = scipy.stats.ortho_group.rvs(dim=2 * k, size=m)
+    else:  # tranformation=='small'
+        # small deviations around the identity
+        noise = np.random.randn(2 * k, 2 * k)
+        antisymmetric = noise - noise.T
+        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in np.linspace(0.001, .1, m)]
+
     ans = np.zeros([n, m + 2, 2])
     for i in range(n):
         # sample mechanisms
