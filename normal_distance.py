@@ -15,18 +15,18 @@ class ConditionalGaussian():
     """
     addfreedom = 10
 
-    def __init__(self, dim, mua=None, cova=None, linear=None, bias=None, condcov=None,
+    def __init__(self, dim, mua, cova, linear, bias, condcov,
                  etaa=None, preca=None, natlinear=None, natbias=None, condprec=None):
         self.dim = dim
         self.eye = np.eye(dim)
 
         # mean parameters
-        self.mua = np.zeros(dim) if mua is None else mua
-        self.cova = self.eye if cova is None else cova
+        self.mua = mua
+        self.cova = cova
 
-        self.linear = self.eye if linear is None else linear
-        self.bias = np.zeros(dim) if bias is None else bias
-        self.condcov = self.eye if condcov is None else condcov
+        self.linear = linear
+        self.bias = bias
+        self.condcov = condcov
 
         # natural parameters
         self.preca = np.linalg.inv(self.cova) if preca is None else preca
