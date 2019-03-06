@@ -16,7 +16,7 @@ class ConditionalGaussian():
     addfreedom = 10
 
     def __init__(self, dim, mua=None, cova=None, linear=None, bias=None, condcov=None,
-                 etaa=None, preca=None, natlinear=None, natbias=None, preccond=None):
+                 etaa=None, preca=None, natlinear=None, natbias=None, condprec=None):
         self.dim = dim
         self.eye = np.eye(dim)
 
@@ -32,9 +32,9 @@ class ConditionalGaussian():
         self.preca = np.linalg.inv(self.cova) if preca is None else preca
         self.etaa = np.dot(self.preca, self.mua) if etaa is None else etaa
 
-        self.preccond = np.linalg.inv(self.condcov) if preccond is None else preccond
-        self.natlinear = np.dot(self.preccond, self.linear) if natlinear is None else natlinear
-        self.natbias = np.dot(self.preccond, self.bias) if natbias is None else natbias
+        self.condprec = np.linalg.inv(self.condcov) if condprec is None else condprec
+        self.natlinear = np.dot(self.condprec, self.linear) if natlinear is None else natlinear
+        self.natbias = np.dot(self.condprec, self.bias) if natbias is None else natbias
 
     def joint_parameters(self):
         mub = np.dot(self.linear, self.mua) + self.bias
@@ -43,8 +43,8 @@ class ConditionalGaussian():
         crosscov = np.dot(self.cova, self.linear.T)
         covariance = np.zeros([2 * self.dim, 2 * self.dim])
         covariance[:self.dim, :self.dim] = self.cova
+        covariance[:self.dim, self.dim:] = crosscov
         covariance[self.dim:, :self.dim] = crosscov.T
-        covariance[:self.dim, :self.dim:] = crosscov
         covariance[self.dim:, self.dim:] = self.condcov + np.linalg.multi_dot([
             self.linear, self.cova, self.linear])
 
@@ -67,7 +67,7 @@ class ConditionalGaussian():
         # parameters of conditional
         linear = np.dot(crosscov.T, preca)
         bias = mub - np.dot(linear, mua)
-        covcond = covb - np.dot(linear, np.dot(cova, linear.T))
+        covcond = covb - np.linalg.multi_dot([linear, cova, linear.T])
 
         return cls(dim, mua, cova, linear, bias, covcond, preca=preca)
 
@@ -110,7 +110,7 @@ class ConditionalGaussian():
 
         return ConditionalGaussian(
             self.dim, mua, cova, self.linear, self.bias, self.condcov,
-            natlinear=self.natlinear, natbias=self.natbias, preccond=self.preccond
+            natlinear=self.natlinear, natbias=self.natbias, condprec=self.condprec
         )
 
     def intervene_on_effect(self):
@@ -132,7 +132,7 @@ class ConditionalGaussian():
 
         natlinear = self.natlinear.T
         natbias = self.etaa - np.dot(natlinear, self.bias)
-        preccond = self.preca + np.dot(self.linear.T, np.dot(self.preccond, self.linear))
+        preccond = self.preca + np.linalg.multi_dot([self.linear.T, self.condprec, self.linear])
 
         covcond = np.linalg.inv(preccond)
         linear = np.dot(covcond, natlinear)
@@ -140,7 +140,7 @@ class ConditionalGaussian():
 
         return ConditionalGaussian(self.dim, mua=mub, cova=covb,
                                    linear=linear, bias=bias, condcov=covcond,
-                                   natlinear=natlinear, natbias=natbias, preccond=preccond)
+                                   natlinear=natlinear, natbias=natbias, condprec=preccond)
 
     def squared_distances(self, other):
         """Return squared distance both in mean and natural parameter space."""
@@ -157,7 +157,7 @@ class ConditionalGaussian():
                 + np.sum((self.preca - other.preca) ** 2)
                 + np.sum((self.natlinear - other.natlinear) ** 2)
                 + np.sum((self.natbias - other.natbias) ** 2)
-                + np.sum((self.preccond - other.preccond) ** 2)
+                + np.sum((self.condprec - other.condprec) ** 2)
         )
 
         return meandist, natdist
@@ -235,23 +235,23 @@ def transform_distances(k, n, m, intervention='cause', transformation='orthonorm
         # small deviations around the identity
         noise = np.random.randn(2 * k, 2 * k)
         antisymmetric = noise - noise.T
-        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in np.linspace(0.001, .1, m)]
+        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in
+                        np.linspace(0.001, 1, m)]
 
     ans = np.zeros([n, m + 2, 2])
     for i in range(n):
         # sample mechanisms
         original = ConditionalGaussian.random(k, symmetric=True)
-        transformed = [original.reverse()] + [original.encode(t) for t in transformers]
+        alloriginals = [original, original.reverse()] + [original.encode(t) for t in transformers]
 
         if intervention == 'cause':
             transfer = original.intervene_on_cause()
         else:  # intervention on effect
             transfer = original.intervene_on_effect()
-        transformed_transfer = [transfer.reverse()] + [transfer.encode(t) for t in transformers]
+        alltransfers = [transfer, transfer.reverse()] + [transfer.encode(t) for t in transformers]
 
-        distances = [original.squared_distances(transfer)]
-        distances += [d.squared_distances(dt)
-                      for d, dt in zip(transformed, transformed_transfer)]
+        distances = [d.squared_distances(dt)
+                     for d, dt in zip(alloriginals, alltransfers)]
 
         ans[i] = np.array(distances)
 
@@ -259,3 +259,5 @@ def transform_distances(k, n, m, intervention='cause', transformation='orthonorm
 
 
 transform_distances(3, 4, 5)
+transform_distances(3, 4, 5, transformation='small')
+transform_distances(3, 4, 5, intervention='effect', transformation='small')
