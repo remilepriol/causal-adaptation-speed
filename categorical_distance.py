@@ -139,13 +139,3 @@ def test_experiment():
 
 test_experiment()
 
-
-if __name__ == "__main__":
-
-    kk = np.arange(2,100,8)
-
-    for intervention in ['cause', 'effect']:
-        for symmetric_init in [True, False]:
-            for symmetric_intervention in [True, False]:
-                for k in kk:
-                    pass
