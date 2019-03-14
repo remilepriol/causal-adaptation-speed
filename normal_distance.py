@@ -4,6 +4,14 @@ import scipy.linalg
 import scipy.stats
 
 
+def check_symmetric(a, tol=1e-8):
+    if np.allclose(a, a.T, atol=tol):
+        return True
+    else:
+        print(a - a.T)
+        return False
+
+
 class ConditionalGaussian():
     """Joint Gaussian distribution between a cause variable A and an effect variable B.
 
@@ -13,7 +21,7 @@ class ConditionalGaussian():
     For both distributions we store both meand natural parameters because we wish to compute
     distances in both of these parametrizations and save compute time.
     """
-    addfreedom = 10
+    addfreedom = 100
 
     def __init__(self, dim, mua, cova, linear, bias, condcov,
                  etaa=None, preca=None, natlinear=None, natbias=None, condprec=None):
@@ -36,6 +44,18 @@ class ConditionalGaussian():
         self.natlinear = np.dot(self.condprec, self.linear) if natlinear is None else natlinear
         self.natbias = np.dot(self.condprec, self.bias) if natbias is None else natbias
 
+    def is_consistent(self):
+        assert check_symmetric(self.cova), self.cova
+        assert check_symmetric(self.preca), self.preca
+        assert check_symmetric(self.condcov), self.condcov
+        assert check_symmetric(self.condprec), self.condprec
+
+        assert np.allclose(self.preca, np.linalg.inv(self.cova))
+        assert np.allclose(self.etaa, np.dot(self.preca, self.mua))
+        assert np.allclose(self.condprec, np.linalg.inv(self.condcov))
+        assert np.allclose(self.natlinear, np.dot(self.condprec, self.linear))
+        assert np.allclose(self.natbias, np.dot(self.condprec, self.bias))
+
     def joint_parameters(self):
         mub = np.dot(self.linear, self.mua) + self.bias
         mean = np.concatenate([self.mua, mub], axis=0)
@@ -46,7 +66,7 @@ class ConditionalGaussian():
         covariance[:self.dim, self.dim:] = crosscov
         covariance[self.dim:, :self.dim] = crosscov.T
         covariance[self.dim:, self.dim:] = self.condcov + np.linalg.multi_dot([
-            self.linear, self.cova, self.linear])
+            self.linear, self.cova, self.linear.T])
 
         return mean, covariance
 
@@ -125,22 +145,29 @@ class ConditionalGaussian():
             bias=mub, condcov=covb
         )
 
-    def reverse(self):
+    def reverse(self, viajoint=False):
         """Return the ConditionalGaussian from B to A."""
-        mub = np.dot(self.linear, self.mua) + self.bias
-        covb = self.condcov + np.dot(self.linear, np.dot(self.cova, self.linear))
+        if not viajoint:
+            mub = np.dot(self.linear, self.mua) + self.bias
+            covb = self.condcov + np.linalg.multi_dot([self.linear, self.cova, self.linear.T])
 
-        natlinear = self.natlinear.T
-        natbias = self.etaa - np.dot(natlinear, self.bias)
-        preccond = self.preca + np.linalg.multi_dot([self.linear.T, self.condprec, self.linear])
+            natlinear = self.natlinear.T
+            natbias = self.etaa - np.dot(natlinear, self.bias)
+            preccond = self.preca + np.linalg.multi_dot(
+                [self.linear.T, self.condprec, self.linear])
 
-        covcond = np.linalg.inv(preccond)
-        linear = np.dot(covcond, natlinear)
-        bias = np.dot(covcond, natbias)
+            covcond = np.linalg.inv(preccond)
+            linear = np.dot(covcond, natlinear)
+            bias = np.dot(covcond, natbias)
 
-        return ConditionalGaussian(self.dim, mua=mub, cova=covb,
-                                   linear=linear, bias=bias, condcov=covcond,
-                                   natlinear=natlinear, natbias=natbias, condprec=preccond)
+            return ConditionalGaussian(self.dim, mua=mub, cova=covb,
+                                       linear=linear, bias=bias, condcov=covcond,
+                                       natlinear=natlinear, natbias=natbias, condprec=preccond)
+        else:
+            m, cov = self.joint_parameters()
+            rm = np.roll(m, self.dim)
+            rcov = np.roll(cov, shift=[self.dim, self.dim], axis=[0, 1])
+            return ConditionalGaussian.from_joint(rm, rcov)
 
     def squared_distances(self, other):
         """Return squared distance both in mean and natural parameter space."""
@@ -168,6 +195,12 @@ class ConditionalGaussian():
              + np.random.multivariate_normal(self.bias, self.condcov, size=n)
         return aa, bb
 
+    def logdensity(self, aa, bb, param='mean'):
+        if param == 'mean':
+            adiff = aa - self.mua
+            marginal = -.5 * np.dot(adiff, np.dot(adiff, self.preca))
+            bmeans = np.dot(aa, self.linear.T) + self.bias
+
     def encode(self, matrix):
         mean, covariance = self.joint_parameters()
         newmean = np.dot(matrix, mean)
@@ -178,16 +211,35 @@ class ConditionalGaussian():
         return ConditionalGaussian.from_joint(newmean, newcovariance)
 
 
-dim = 2
-a = ConditionalGaussian.random(dim, symmetric=False)
-a = ConditionalGaussian.random(dim, symmetric=True)
-a.intervene_on_cause()
-a.intervene_on_effect()
-b = a.reverse()
-a.squared_distances(b)
-a.sample(10)
-transform = scipy.stats.ortho_group.rvs(2 * dim)
-c = a.encode(transform)
+def test_ConditionalGaussian(dim=2):
+    ConditionalGaussian.random(dim, symmetric=False)
+    a = ConditionalGaussian.random(dim, symmetric=True)
+    b = a.intervene_on_cause()
+    a.intervene_on_effect()
+    a.reverse()
+    a.squared_distances(b)
+    a.sample(10)
+    transform = scipy.stats.ortho_group.rvs(2 * dim)
+    c = a.encode(transform)
+    d = b.encode(transform)
+
+    a.is_consistent()
+    b.is_consistent()
+    c.is_consistent()
+    d.is_consistent()
+
+    #print("causal distance after intervention", a.squared_distances(b))
+    #print("transformed after intervention", c.squared_distances(d))
+
+    dist = a.reverse().reverse().squared_distances(a)
+    assert np.allclose(dist, 0), print("reverse reverse", dist)
+    dist = c.reverse().reverse().squared_distances(c)
+    assert np.allclose(dist, 0), print("reverse reverse", dist)
+    dist = a.reverse(viajoint=True).squared_distances(a.reverse(viajoint=False))
+    assert np.allclose(dist, 0), print("reverse vs joint reverse", dist)
+
+
+test_ConditionalGaussian()
 
 
 def gaussian_distances(k, n, intervention='cause', symmetric=False):
@@ -218,7 +270,8 @@ def gaussian_distances(k, n, intervention='cause', symmetric=False):
 gaussian_distances(3, 4)
 
 
-def transform_distances(k, n, m, intervention='cause', transformation='orthonormal'):
+def transform_distances(k, n, m, intervention='cause', transformation='orthonormal',
+                        noiserange=None):
     """ Evaluate distance induced by interventions and orthonormal transformations.
 
     Sample  n conditional Gaussians between cause and effect of dimension k.
@@ -232,11 +285,14 @@ def transform_distances(k, n, m, intervention='cause', transformation='orthonorm
     if transformation == 'orthonormal':
         transformers = scipy.stats.ortho_group.rvs(dim=2 * k, size=m)
     else:  # tranformation=='small'
-        # small deviations around the identity
+        # small orthonormal deviations around the identity
         noise = np.random.randn(2 * k, 2 * k)
         antisymmetric = noise - noise.T
-        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in
-                        np.linspace(0.001, 1, m)]
+        if noiserange is None:
+            noiserange = np.linspace(0.1, 1, m)
+        else:
+            m = len(noiserange)
+        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in noiserange]
 
     ans = np.zeros([n, m + 2, 2])
     for i in range(n):
