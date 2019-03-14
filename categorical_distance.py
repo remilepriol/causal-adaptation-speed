@@ -1,157 +1,151 @@
 import numpy as np
 
 
-def causal2anti(pa, cond_pba):
-    """Return marginal pb and conditional pab such that pab*pb = pba*pa.
-
-    pa is n*k array.
-    pba is n*k*k array.
-    """
-    joint = cond_pba * np.expand_dims(pa, axis=-1)
-    joint = np.swapaxes(joint, -1, -2)
-    pb = np.sum(joint, axis=-1)
-    cond_pab = joint / np.expand_dims(pb, axis=-1)
-
-    return pb, cond_pab
-
-
-def test_causal2anti():
-    pa = np.array([.5, .5])
-    pba = np.array([[.5, .5], [0, 1]])
-
-    anspb = np.array([.25, .75])
-    anspab = np.array([[1, 0], [1 / 3, 2 / 3]])
-    pb, pab = causal2anti(pa, pba)
-
-    assert np.allclose(pb, anspb)
-    assert np.allclose(pab, anspab)
-
-
-test_causal2anti()
-
-
 def proba2logit(p):
     s = np.log(p)
     s -= np.mean(s, axis=-1, keepdims=True)
     return s
 
 
-def normal2anti(p):
-    pass
+def joint2conditional(joint):
+    marginal = np.sum(joint, axis=-1)
+    conditional = joint / np.expand_dims(marginal, axis=-1)
+
+    return ConditionalCategorical(marginal, conditional)
 
 
-def categorical_distances_cause(k, n, concentration=1):
-    """Sample n mechanisms from a dirichlet of order k then evaluate the distance after
-    intervention on the cause between causal and anticausal models.
+def sample_joint(k, n, concentration, symmetric=True):
+    """Sample n causal mechanisms of categorical variables of dimension K."""
+    if symmetric:
+        joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
+        return joint2conditional(joint)
+    else:
+        pa = np.random.dirichlet(concentration * np.ones(k), size=n)
+        pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
+        return ConditionalCategorical(pa, pba)
+
+
+class ConditionalCategorical():
+    """Represent n categorical distributions of variables (a,b) of dimension k each."""
+
+    def __init__(self, marginal, conditional):
+        """The distribution is represented by a marginal p(a) and a conditional p(b|a)
+
+        marginal is n*k array.
+        conditional is n*k*k array. Each element conditional[i,j,k] is p_i(b=k |a=j)
+        """
+        self.n = marginal.shape[0]
+        self.k = marginal.shape[1]
+
+        s = conditional.shape
+        assert s[0] == self.n
+        assert s[1] == self.k and s[2] == self.k
+        assert np.allclose(marginal.sum(axis=-1), np.ones(self.n))
+        assert np.allclose(conditional.sum(axis=-1), np.ones((self.n, self.k)))
+
+        self.marginal = marginal
+        self.conditional = conditional
+
+        self.sa = proba2logit(self.marginal)
+        self.sba = proba2logit(self.conditional)
+
+    def to_joint(self):
+        return self.conditional * np.expand_dims(self.marginal, axis=-1)
+
+    def reverse(self):
+        """Return conditional from b to a.
+        Compute marginal pb and conditional pab such that pab*pb = pba*pa.
+        """
+        joint = self.to_joint()
+        joint = np.swapaxes(joint, -1, -2)  # invert variables
+        return joint2conditional(joint)
+
+    def sqdistance(self, other):
+        """Return the squared euclidean distance between self and other"""
+        pd = np.sum((self.marginal - other.marginal) ** 2, axis=(-1))
+        pd += np.sum((self.conditional - other.conditional) ** 2, axis=(-1, -2))
+
+        sd = np.sum((self.sa - other.sa) ** 2, axis=(-1))
+        sd += np.sum((self.sba - other.sba) ** 2, axis=(-1, -2))
+        return pd, sd
+
+    def intervention(self, on, concentration, fromjoint=True):
+        # sample new marginal
+        if fromjoint:
+            newmarginal = sample_joint(self.k, self.n, concentration, symmetric=True).marginal
+        else:
+            newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
+
+        # replace the cause or the effect by this marginal
+        if on == 'cause':
+            return ConditionalCategorical(newmarginal, self.conditional)
+        else:  # intervention on effect
+            newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
+            return ConditionalCategorical(self.marginal, newconditional)
+
+
+def test_causal2anti():
+    pa = np.array([[.5, .5]])
+    pba = np.array([[[.5, .5], [1 / 3, 2 / 3]]])
+    anspb = np.array([[5 / 12, 7 / 12]])
+    anspab = np.array([[[3 / 5, 2 / 5], [3 / 7, 4 / 7]]])
+
+    test = ConditionalCategorical(pa, pba).reverse()
+    answer = ConditionalCategorical(anspb, anspab)
+
+    probadist, scoredist = test.sqdistance(answer)
+    assert probadist < 1e-4, probadist
+    # score dist will be nan because of the 0 probabilities
+
+
+test_causal2anti()
+
+
+def experiment(k, n, concentration, intervention,
+               symmetric_init=True, symmetric_intervention=True):
+    """Sample n mechanisms of order k and for each of them sample an intervention on the desired
+    mechanism. Return the distance between the original distribution and the intervened
+    distribution in the causal parameter space and in the anticausal parameter space.
+
+    :param intervention: takes value 'cause' or 'effect'
+    :param symmetric_init: sample the causal parameters such that the marginals on a and b are
+    drawn from the same distribution
+    :param symmetric_intervention: sample the intervention parameters from the same law as the
+    initial parameters
     """
+    # causal parameters
+    causal = sample_joint(k, n, concentration, symmetric_init)
+    transfer = causal.intervention(
+        on=intervention,
+        concentration=concentration,
+        fromjoint=symmetric_intervention
+    )
+    cpd, csd = causal.sqdistance(transfer)
 
-    # sample mechanisms
-    joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
-    pa = np.sum(joint, axis=1)
-    pba = joint / pa[:, None, :]
+    # anticausal parameters
+    anticausal = causal.reverse()
+    antitransfer = transfer.reverse()
+    apd, asd = anticausal.sqdistance(antitransfer)
 
-    tpa = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k)).sum(
-        axis=1)
-
-    # pb = np.sum(joint, axis=2)
-    # pab = joint / pb[:, :, None]
-
-    # pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-    # tpa = np.random.dirichlet(concentration * np.ones(k), size=n)  # transfer / intervention
-    # pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
-
-    # evaluate anticausal probabilities
-    pb, pab = causal2anti(pa, pba)
-    tpb, tpab = causal2anti(tpa, pba)
-
-    # compute distances
-    distances = np.zeros([n, 8])
-
-    distances[:, 0] = np.sum((pa - tpa) ** 2, axis=-1)
-    bmarginaldistance = np.sum((pb - tpb) ** 2, axis=-1)
-    distances[:, 1] = bmarginaldistance + np.sum((pab - tpab) ** 2, axis=(-1, -2))
-    distances[:, 2] = distances[:, 1] / distances[:, 0]
-
-    distances[:, 6] = bmarginaldistance
-
-    # in the score / logits space, we have to consider logits which sum to 0
-    sa = proba2logit(pa)
-    tsa = proba2logit(tpa)
-    # sba = proba2logit(pba)
-
-    sb = proba2logit(pb)
-    sab = proba2logit(pab)
-
-    tsb = proba2logit(tpb)
-    tsab = proba2logit(tpab)
-
-    # distances
-    distances[:, 3] = np.sum((sa - tsa) ** 2, axis=-1)  # causal
-    bmarginaldistance = np.sum((sb - tsb) ** 2, axis=-1)
-    distances[:, 4] = bmarginaldistance + np.sum((sab - tsab) ** 2, axis=(-1, -2))  # anticausal
-    distances[:, 5] = distances[:, 4] / distances[:, 3]  # ratio
-
-    distances[:, 7] = bmarginaldistance
-
-    return distances
+    return np.array([cpd, apd, csd, asd])
 
 
-categorical_distances_cause(3, 4)
+def test_experiment():
+    for intervention in ['cause', 'effect']:
+        for symmetric_init in [True, False]:
+            for symmetric_intervention in [True, False]:
+                experiment(2, 3, 1, intervention, symmetric_init, symmetric_intervention)
 
 
-def categorical_distances_effect(k, n, concentration=1):
-    """Sample n mechanisms from a dirichlet of order k then evaluate the distance after
-    intervention on the effect between causal and anticausal models.
-    """
-
-    # sample causal mechanisms
-    joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
-    pa = np.sum(joint, axis=1)
-    pba = joint / pa[:, None, :]
-
-    # pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-    # pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
-    # # evaluate anticausal probabilities
-    pb, pab = causal2anti(pa, pba)
-
-    # intervention on the effect. tp = transfer distribution. tp(a,b) = tp(a)*tp(b)
-    tpb = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k)).sum(
-        axis=1)
-    tpa = pa
-    tpba = np.expand_dims(tpb, axis=1)
-    tpab = np.expand_dims(tpa, axis=1)
-
-    # compute distances
-    distances = np.zeros([n, 8])
-
-    distances[:, 0] = np.sum((pba - tpba) ** 2, axis=(1, 2))  # causal
-    bmarginaldistance = np.sum((pb - tpb) ** 2, axis=1)
-    distances[:, 1] = bmarginaldistance + np.sum((pab - tpab) ** 2, axis=(1, 2))
-    distances[:, 2] = distances[:, 1] / distances[:, 0]
-
-    distances[:, 6] = bmarginaldistance
-
-    # in the score / logits space, we have to consider logits which sum to 0
-    sba = proba2logit(pba)
-    tsba = proba2logit(tpba)
-
-    sb = proba2logit(pb)
-    tsb = proba2logit(tpb)
-
-    sab = proba2logit(pab)
-    tsab = proba2logit(tpab)
-
-    # distances
-    distances[:, 3] = np.sum((sba - tsba) ** 2, axis=(1, 2))
-    bmarginaldistance = np.sum((sb - tsb) ** 2, axis=1)
-    distances[:, 4] = bmarginaldistance + np.sum((sab - tsab) ** 2, axis=(1, 2))
-    distances[:, 5] = distances[:, 4] / distances[:, 3]
-
-    distances[:, 7] = bmarginaldistance
-
-    return distances
+test_experiment()
 
 
-categorical_distances_effect(3, 4)
+if __name__ == "__main__":
 
+    kk = np.arange(2,100,8)
 
+    for intervention in ['cause', 'effect']:
+        for symmetric_init in [True, False]:
+            for symmetric_intervention in [True, False]:
+                for k in kk:
+                    pass
