@@ -28,9 +28,6 @@ def test_proba2logit():
     assert np.allclose(p, q), p - q
 
 
-test_proba2logit()
-
-
 def joint2conditional(joint):
     marginal = np.sum(joint, axis=-1)
     conditional = joint / np.expand_dims(marginal, axis=-1)
@@ -112,8 +109,34 @@ class ConditionalCategorical:
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return ConditionalCategorical(self.marginal, newconditional)
 
+    def sample(self, m):
+        """For each of the n distributions, return m samples. (n*m*2 array) """
+        flatjoints = self.to_joint().reshape((self.n, self.k ** 2))
+        samples = np.array([np.random.choice(self.k ** 2, size=m, p=p) for p in flatjoints])
+        a = samples // self.k
+        b = samples % self.k
+        return a, b
+
+    def __iter__(self):
+        self.i = 0
+        return self
+
+    def __next__(self):
+        if self.i < self.n:
+            ans = ConditionalCategorical(self.marginal[self.i:self.i + 1], self.conditional[self.i:self.i + 1])
+            self.i += 1
+            return ans
+        raise StopIteration()
+
+    def __repr__(self):
+        return (f"n={self.n} categorical of dimension k={self.k}\n"
+                f"{self.marginal}\n"
+                f"{self.conditional}")
+
 
 def test_ConditionalCategorical():
+    print('test categorical numpy collection')
+
     # test the reversion formula on a known example
     pa = np.array([[.5, .5]])
     pba = np.array([[[.5, .5], [1 / 3, 2 / 3]]])
@@ -128,11 +151,10 @@ def test_ConditionalCategorical():
     assert scoredist < 1e-4, scoredist
 
     # ensure that reverse is reversible
-    distrib = sample_joint(20, 100, 1, False)
+    distrib = sample_joint(13, 17, 1, False)
     assert np.allclose(0, distrib.reverse().reverse().sqdistance(distrib))
 
-
-test_ConditionalCategorical()
+    a, b = distrib.sample(19)
 
 
 def experiment(k, n, concentration, intervention,
@@ -165,13 +187,11 @@ def experiment(k, n, concentration, intervention,
 
 
 def test_experiment():
+    print('test experiment')
     for intervention in ['cause', 'effect', 'independent']:
         for symmetric_init in [True, False]:
             for symmetric_intervention in [True, False]:
                 experiment(2, 3, 1, intervention, symmetric_init, symmetric_intervention)
-
-
-test_experiment()
 
 
 class CategoricalModule(nn.Module):
@@ -189,11 +209,24 @@ class CategoricalModule(nn.Module):
 
 
 def test_CategoricalModule():
+    print('test categorical module')
     references = sample_joint(5, 10, 1)
-    modules = [CategoricalModule(r) for r in references]
     intervened = references.intervention(on='cause', concentration=1)
-    samples =
-    print(modules([0, 1], [2, 3]))
+
+    modules = [CategoricalModule(r) for r in references]
+    allparameters = [param for m in modules for param in m.parameters()]
+    optimizer = optim.SGD(allparameters, lr=0.1)
+
+    aa, bb = intervened.sample(13)
+    negativeloglikelihoods = [-m(a, b).mean() for m, a, b in zip(modules, aa, bb)]
+    for ll in negativeloglikelihoods:
+        optimizer.zero_grad()
+        ll.backward()
+        optimizer.step()
 
 
-test_CategoricalModule()
+if __name__ == "__main__":
+    test_proba2logit()
+    test_ConditionalCategorical()
+    test_experiment()
+    test_CategoricalModule()
