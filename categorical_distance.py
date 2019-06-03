@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+import torch.nn as nn
 
 
 def proba2logit(p):
@@ -171,3 +173,27 @@ def test_experiment():
 
 test_experiment()
 
+
+class CategoricalModule(nn.Module):
+    """Represent 1 categorical conditionala as a pytorch module"""
+
+    def __init__(self, joint: ConditionalCategorical):
+        super(CategoricalModule, self).__init__()
+        self.sa = nn.Parameter(torch.tensor(joint.sa[0]))
+        self.sba = nn.Parameter(torch.tensor(joint.sba[0]))
+
+    def forward(self, a, b):
+        a_scores = self.sa[a]
+        cond_scores = self.sba[a, b]
+        return a_scores + cond_scores
+
+
+def test_CategoricalModule():
+    references = sample_joint(5, 10, 1)
+    modules = [CategoricalModule(r) for r in references]
+    intervened = references.intervention(on='cause', concentration=1)
+    samples =
+    print(modules([0, 1], [2, 3]))
+
+
+test_CategoricalModule()
