@@ -7,6 +7,28 @@ def proba2logit(p):
     return s
 
 
+def logsumexp(s):
+    smax = np.amax(s, axis=-1)
+    return smax + np.log(np.sum(np.exp(s - np.expand_dims(smax, axis=-1)), axis=-1))
+
+
+def logit2proba(s):
+    return np.exp(s - np.expand_dims(logsumexp(s), axis=-1))
+
+
+def test_proba2logit():
+    p = np.random.dirichlet(np.ones(50), size=300)
+    s = proba2logit(p)
+    assert np.allclose(0, np.sum(s, axis=-1))
+
+    q = logit2proba(s)
+    assert np.allclose(1, np.sum(q, axis=-1)), q
+    assert np.allclose(p, q), p - q
+
+
+test_proba2logit()
+
+
 def joint2conditional(joint):
     marginal = np.sum(joint, axis=-1)
     conditional = joint / np.expand_dims(marginal, axis=-1)
@@ -25,7 +47,7 @@ def sample_joint(k, n, concentration, symmetric=True):
         return ConditionalCategorical(pa, pba)
 
 
-class ConditionalCategorical():
+class ConditionalCategorical:
     """Represent n categorical distributions of variables (a,b) of dimension k each."""
 
     def __init__(self, marginal, conditional):
@@ -71,10 +93,15 @@ class ConditionalCategorical():
 
     def intervention(self, on, concentration, fromjoint=True):
         # sample new marginal
-        if fromjoint:
-            newmarginal = sample_joint(self.k, self.n, concentration, symmetric=True).marginal
+        if on == 'independent':
+            # make cause and effect independent,
+            # but without changing the effect marginal.
+            newmarginal = self.reverse().marginal
         else:
-            newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
+            if fromjoint:
+                newmarginal = sample_joint(self.k, self.n, concentration, symmetric=True).marginal
+            else:
+                newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
@@ -84,7 +111,8 @@ class ConditionalCategorical():
             return ConditionalCategorical(self.marginal, newconditional)
 
 
-def test_causal2anti():
+def test_ConditionalCategorical():
+    # test the reversion formula on a known example
     pa = np.array([[.5, .5]])
     pba = np.array([[[.5, .5], [1 / 3, 2 / 3]]])
     anspb = np.array([[5 / 12, 7 / 12]])
@@ -95,14 +123,18 @@ def test_causal2anti():
 
     probadist, scoredist = test.sqdistance(answer)
     assert probadist < 1e-4, probadist
-    # score dist will be nan because of the 0 probabilities
+    assert scoredist < 1e-4, scoredist
+
+    # ensure that reverse is reversible
+    distrib = sample_joint(20, 100, 1, False)
+    assert np.allclose(0, distrib.reverse().reverse().sqdistance(distrib))
 
 
-test_causal2anti()
+test_ConditionalCategorical()
 
 
 def experiment(k, n, concentration, intervention,
-               symmetric_init=True, symmetric_intervention=True):
+               symmetric_init=True, symmetric_intervention=False):
     """Sample n mechanisms of order k and for each of them sample an intervention on the desired
     mechanism. Return the distance between the original distribution and the intervened
     distribution in the causal parameter space and in the anticausal parameter space.
@@ -127,11 +159,11 @@ def experiment(k, n, concentration, intervention,
     antitransfer = transfer.reverse()
     apd, asd = anticausal.sqdistance(antitransfer)
 
-    return np.array([cpd, apd, csd, asd])
+    return np.array([[cpd, csd], [apd, asd]])
 
 
 def test_experiment():
-    for intervention in ['cause', 'effect']:
+    for intervention in ['cause', 'effect', 'independent']:
         for symmetric_init in [True, False]:
             for symmetric_intervention in [True, False]:
                 experiment(2, 3, 1, intervention, symmetric_init, symmetric_intervention)
