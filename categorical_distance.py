@@ -1,6 +1,10 @@
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn, optim
+
+
+def kullback_leibler(p1, p2):
+    return np.sum(p1 * np.log(p1 / p2))
 
 
 def proba2logit(p):
@@ -89,6 +93,9 @@ class ConditionalCategorical:
         sd = np.sum((self.sa - other.sa) ** 2, axis=(-1))
         sd += np.sum((self.sba - other.sba) ** 2, axis=(-1, -2))
         return pd, sd
+
+    def kullback_leibler(self, other):
+        return kullback_leibler(self.to_joint().flatten(), other.to_joint().flatten())
 
     def intervention(self, on, concentration, fromjoint=True):
         # sample new marginal
