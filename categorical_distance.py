@@ -36,7 +36,7 @@ def joint2conditional(joint):
     marginal = np.sum(joint, axis=-1)
     conditional = joint / np.expand_dims(marginal, axis=-1)
 
-    return ConditionalCategorical(marginal, conditional)
+    return CategoricalStatic(marginal, conditional)
 
 
 def sample_joint(k, n, concentration, symmetric=True):
@@ -47,10 +47,10 @@ def sample_joint(k, n, concentration, symmetric=True):
     else:
         pa = np.random.dirichlet(concentration * np.ones(k), size=n)
         pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
-        return ConditionalCategorical(pa, pba)
+        return CategoricalStatic(pa, pba)
 
 
-class ConditionalCategorical:
+class CategoricalStatic:
     """Represent n categorical distributions of variables (a,b) of dimension k each."""
 
     def __init__(self, marginal, conditional):
@@ -85,14 +85,19 @@ class ConditionalCategorical:
         joint = np.swapaxes(joint, -1, -2)  # invert variables
         return joint2conditional(joint)
 
-    def sqdistance(self, other):
-        """Return the squared euclidean distance between self and other"""
+    def probadist(self, other):
         pd = np.sum((self.marginal - other.marginal) ** 2, axis=(-1))
         pd += np.sum((self.conditional - other.conditional) ** 2, axis=(-1, -2))
+        return pd
 
+    def scoredist(self, other):
         sd = np.sum((self.sa - other.sa) ** 2, axis=(-1))
         sd += np.sum((self.sba - other.sba) ** 2, axis=(-1, -2))
-        return pd, sd
+        return sd
+
+    def sqdistance(self, other):
+        """Return the squared euclidean distance between self and other"""
+        return self.probadist(other), self.scoredist(other)
 
     def kullback_leibler(self, other):
         return kullback_leibler(self.to_joint().flatten(), other.to_joint().flatten())
@@ -111,10 +116,10 @@ class ConditionalCategorical:
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
-            return ConditionalCategorical(newmarginal, self.conditional)
+            return CategoricalStatic(newmarginal, self.conditional)
         else:  # intervention on effect
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
-            return ConditionalCategorical(self.marginal, newconditional)
+            return CategoricalStatic(self.marginal, newconditional)
 
     def sample(self, m):
         """For each of the n distributions, return m samples. (n*m*2 array) """
@@ -130,7 +135,7 @@ class ConditionalCategorical:
 
     def __next__(self):
         if self.i < self.n:
-            ans = ConditionalCategorical(self.marginal[self.i:self.i + 1], self.conditional[self.i:self.i + 1])
+            ans = CategoricalStatic(self.marginal[self.i:self.i + 1], self.conditional[self.i:self.i + 1])
             self.i += 1
             return ans
         raise StopIteration()
@@ -141,7 +146,7 @@ class ConditionalCategorical:
                 f"{self.conditional}")
 
 
-def test_ConditionalCategorical():
+def test_ConditionalStatic():
     print('test categorical numpy collection')
 
     # test the reversion formula on a known example
@@ -150,8 +155,8 @@ def test_ConditionalCategorical():
     anspb = np.array([[5 / 12, 7 / 12]])
     anspab = np.array([[[3 / 5, 2 / 5], [3 / 7, 4 / 7]]])
 
-    test = ConditionalCategorical(pa, pba).reverse()
-    answer = ConditionalCategorical(anspb, anspab)
+    test = CategoricalStatic(pa, pba).reverse()
+    answer = CategoricalStatic(anspb, anspab)
 
     probadist, scoredist = test.sqdistance(answer)
     assert probadist < 1e-4, probadist
@@ -204,7 +209,7 @@ def test_experiment():
 class CategoricalModule(nn.Module):
     """Represent 1 categorical conditionala as a pytorch module"""
 
-    def __init__(self, joint: ConditionalCategorical):
+    def __init__(self, joint: CategoricalStatic):
         super(CategoricalModule, self).__init__()
         self.sa = nn.Parameter(torch.tensor(joint.sa[0]))
         self.sba = nn.Parameter(torch.tensor(joint.sba[0]))
@@ -214,6 +219,10 @@ class CategoricalModule(nn.Module):
         cond_scores = self.sba[a, b]
         return a_scores + cond_scores
 
+    def to_static(self):
+        return CategoricalStatic(logit2proba(self.sa.detach().unsqueeze(dim=0).numpy()),
+                                 logit2proba(self.sba.detach().unsqueeze(dim=0).numpy()))
+
 
 def test_CategoricalModule():
     print('test categorical module')
@@ -222,7 +231,7 @@ def test_CategoricalModule():
 
     modules = [CategoricalModule(r) for r in references]
     allparameters = [param for m in modules for param in m.parameters()]
-    optimizer = optim.SGD(allparameters, lr=0.1)
+    optimizer = optim.SGD(allparameters, lr=1)
 
     aa, bb = intervened.sample(13)
     negativeloglikelihoods = [-m(a, b).mean() for m, a, b in zip(modules, aa, bb)]
@@ -231,9 +240,74 @@ def test_CategoricalModule():
         ll.backward()
         optimizer.step()
 
+    updated = [m.to_static() for m in modules]
+    kls = [i.kullback_leibler(u) for i, u in zip(intervened, updated)]
+
+
+def experiment_optimize(k, n, T, lr, concentration, intervention,
+                        symmetric_init=True, symmetric_intervention=False):
+    """Measure optimization speed and parameters distance.
+
+    Sample n mechanisms of order k and for each of them sample an
+    intervention on the desired mechanism. Use SGD to update a causal
+    and an anticausal model for T steps. At each step, measure KL
+    and distance in scores for causal and anticausal directions.
+
+    :param intervention: takes value 'cause' or 'effect'
+    :param symmetric_init: sample the causal parameters such that the marginals on a and b are
+    drawn from the same distribution
+    :param symmetric_intervention: sample the intervention parameters from the same law as the
+    initial parameters
+    """
+    causal = sample_joint(k, n, concentration, symmetric_init)
+    transfer = causal.intervention(
+        on=intervention,
+        concentration=concentration,
+        fromjoint=symmetric_intervention
+    )
+    anticausal = causal.reverse()
+    antitransfer = transfer.reverse()
+
+    causalmodules = [CategoricalModule(d) for d in causal]
+    antimodules = [CategoricalModule(d) for d in anticausal]
+    modules = causalmodules + antimodules
+    allparameters = [param for m in modules for param in m.parameters()]
+    optimizer = optim.SGD(allparameters, lr=lr)
+
+    ans = np.zeros([n, T + 1, 2, 2])
+    ans[:, 0, 0, 0] = transfer.kullback_leibler(causal)
+    ans[:, 0, 0, 1] = causal.scoredist(transfer)
+
+    ans[:, 0, 1, 0] = antitransfer.kullback_leibler(anticausal)
+    ans[:, 0, 1, 1] = anticausal.scoredist(antitransfer)
+
+    for t in range(1, T + 1):
+        aa, bb = transfer.sample(m=10)
+        optimizer.zero_grad()
+        nlls = [-m(a, b).mean() for m, a, b in zip(modules, aa, bb)]
+        for nll in nlls:
+            nll.backward()
+        optimizer.step()
+
+        for i, (trans, module) in enumerate(zip(transfer, causalmodules)):
+            static = module.to_static()
+            ans[i, t, 0, 0] = trans.kullback_leibler(static)
+            ans[i, t, 0, 1] = trans.scoredist(static)
+
+        for i, (trans, module) in enumerate(zip(antitransfer, antimodules)):
+            static = module.to_static()
+            ans[i, t, 1, 0] = trans.kullback_leibler(static)
+            ans[i, t, 1, 1] = trans.scoredist(static)
+
+    return ans
+
+
+def test_experiment_optimize():
+    print(experiment_optimize(10, 13, 17,lr=1,concentration=1, intervention='cause'))
 
 if __name__ == "__main__":
     test_proba2logit()
-    test_ConditionalCategorical()
+    test_ConditionalStatic()
     test_experiment()
     test_CategoricalModule()
+    test_experiment_optimize()
