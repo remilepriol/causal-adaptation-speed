@@ -6,7 +6,20 @@ import numpy as np
 import tqdm
 
 
-def bigplot(exp):
+def dist_plot():
+    with open('results/categorical_distances.pkl', 'rb') as fin:
+        results = pickle.load(fin)
+
+    plotdir = 'plots/categorical'
+    os.makedirs(plotdir, exist_ok=True)
+
+    for exp in tqdm.tqdm(results):
+        bigplot(exp)
+        plt.savefig(os.path.join(plotdir, bigplotname(exp)))
+        plt.close()
+
+
+def bigplot(exp, confidence=(5, 95)):
     """Draw 4 scatter plots and 2 line plots"""
     proba, score = tuple(np.swapaxes(exp['distances'], 0, 2))
     causal_proba, anti_proba = tuple(proba)
@@ -35,7 +48,6 @@ def bigplot(exp):
     ratio_proba = anti_proba / causal_proba
     ratio_score = anti_score / causal_score
 
-    confidence = (5, 95)
     for ax, ratio in zip([axs[2, 0], axs[2, 1]], [ratio_proba, ratio_score]):
         ax.plot(dimensions, np.mean(ratio, axis=-1), label='mean')
         ax.fill_between(dimensions, np.percentile(ratio, confidence[0], axis=-1),
@@ -48,7 +60,7 @@ def bigplot(exp):
     return fig, axs
 
 
-def plotname(exp):
+def bigplotname(exp):
     return "{}_{}_{}_{}.pdf".format(
         exp['intervention'],
         exp['concentration'],
@@ -57,15 +69,49 @@ def plotname(exp):
     )
 
 
-if __name__ == "__main__":
-
-    with open('results/categorical_distances.pkl', 'rb') as fin:
+def optim_plot():
+    with open('results/categorical_optimize_k=10.pkl', 'rb') as fin:
         results = pickle.load(fin)
 
-    plotdir = 'plots/categorical'
+    plotdir = 'plots/categorical_optim'
     os.makedirs(plotdir, exist_ok=True)
 
     for exp in tqdm.tqdm(results):
-        bigplot(exp)
-        plt.savefig(os.path.join(plotdir, plotname(exp)))
+        longplot(exp)
+        plt.savefig(os.path.join(plotdir, longplotname(exp)))
         plt.close()
+
+
+def longplot(exp, confidence=(5, 95)):
+    """Draw mean trajectory plot with percentiles"""
+    trajectory = exp['trajectory']
+    fig, axs = plt.subplots(nrows=2, ncols=1, figsize=(10, 8), sharex=True)
+
+    mean_trajectory = np.mean(trajectory, axis=0)
+    lower = np.percentile(trajectory, confidence[0], axis=0)
+    upper = np.percentile(trajectory, confidence[1], axis=0)
+
+    for i, ax in enumerate(axs) :
+        for j, label in enumerate(['causal', 'anticausal']):
+            ax.plot(mean_trajectory[:, j, i], label=label)
+            ax.fill_between(np.arange(trajectory.shape[1]), lower[:, j, i], upper[:, j, i],
+                             alpha=.4, label='confidence {} %'.format(confidence[1] - confidence[0]))
+
+
+    axs[0].set_ylabel('KL(transfer, model)')
+    axs[0].legend()
+    axs[1].set_ylabel('\|transfer - model \|^2')
+
+
+def longplotname(exp):
+    return "{}_k={}_lr={}_concentration={}_T={}.pdf".format(
+        exp['intervention'],
+        exp['k'],
+        exp['lr'],
+        exp['concentration'],
+        exp['T']
+    )
+
+
+if __name__ == "__main__":
+    optim_plot()
