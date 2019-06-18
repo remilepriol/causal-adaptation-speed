@@ -104,13 +104,7 @@ def longplot(exp, confidence=(5, 95)):
 
 
 def longplotname(exp):
-    return "{}_k={}_lr={}_concentration={}_T={}.pdf".format(
-        exp['intervention'],
-        exp['k'],
-        exp['lr'],
-        exp['concentration'],
-        exp['T']
-    )
+    return "{intervention}_k={k}_lr={lr}_bs={batch_size}_concentration={concentration}_T={T}.pdf".format(**exp)
 
 
 if __name__ == "__main__":

@@ -279,7 +279,7 @@ def test_CategoricalModule():
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
                         is_init_symmetric=True, is_intervention_symmetric=False,
-                        batch_size=10, rate_alpha=0, log_interval=10):
+                        batch_size=10, scheduler_exponent=0, log_interval=10):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -319,13 +319,13 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     for t in tqdm.tqdm(range(1, T + 1)):
         aa, bb = transfer.sample(m=batch_size, return_tensor=True)
 
-        causaloptimizer.lr = lr / t ** rate_alpha
+        causaloptimizer.lr = lr / t ** scheduler_exponent
         causaloptimizer.zero_grad()
         causalloss = - causalmodules(aa, bb).sum() / batch_size
         causalloss.backward()
         causaloptimizer.step()
 
-        antioptimizer.lr = lr / t ** rate_alpha
+        antioptimizer.lr = lr / t ** scheduler_exponent
         antioptimizer.zero_grad()
         antiloss = - antimodules(bb, aa).sum() / batch_size
         antiloss.backward()

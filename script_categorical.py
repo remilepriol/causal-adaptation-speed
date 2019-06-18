@@ -37,10 +37,14 @@ def all_distances():
         pickle.dump(results, fout)
 
 
-def optimize_distances(k =10):
+def optimize_distances(k=10):
     results = []
-    base_experiment = {'n': 5, 'k': k, 'T': 3000, 'concentration': 1, 'intervention': 'cause'}
-    for lr in [0.05, 0.1, .5]:
+    base_experiment = {
+        'n': 5, 'k': k, 'T': 3000,
+        'batch_size': 1000, 'scheduler_exponent':2/3,
+        'concentration': 1, 'intervention': 'cause'
+    }
+    for lr in [0.01, 0.05, 0.1]:
         trajectory = categorical_distance.experiment_optimize(lr=lr, **base_experiment)
         experiment = {**base_experiment, 'lr': lr, **trajectory}
         results.append(experiment)
