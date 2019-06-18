@@ -84,23 +84,23 @@ def optim_plot():
 
 def longplot(exp, confidence=(5, 95)):
     """Draw mean trajectory plot with percentiles"""
-    trajectory = exp['trajectory']
-    fig, axs = plt.subplots(nrows=2, ncols=1, figsize=(10, 8), sharex=True)
-
-    mean_trajectory = np.mean(trajectory, axis=0)
-    lower = np.percentile(trajectory, confidence[0], axis=0)
-    upper = np.percentile(trajectory, confidence[1], axis=0)
-
-    for i, ax in enumerate(axs):
+    fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(10, 8))
+    for ax, metric in zip(axs, ['kl', 'scoredist']):
         ax.grid(True)
-        for j, label in enumerate(['causal', 'anticausal']):
-            ax.plot(mean_trajectory[:, j, i], label=label)
-            ax.fill_between(np.arange(trajectory.shape[1]), lower[:, j, i], upper[:, j, i],
-                            alpha=.4, label='confidence {} %'.format(confidence[1] - confidence[0]))
+        for model_family in ['causal', 'anti']:
+            values = exp[metric + '_' + model_family]
+
+            ax.plot(exp['steps'], values.mean(axis=1), label=model_family)
+            ax.fill_between(
+                exp['steps'],
+                np.percentile(values, confidence[0], axis=1),
+                np.percentile(values, confidence[1], axis=1),
+                alpha=.4,
+                label='confidence {} %'.format(confidence[1] - confidence[0]))
 
     axs[0].set_ylabel('KL(transfer, model)')
     axs[0].legend()
-    axs[1].set_ylabel('\|transfer - model \|^2')
+    axs[1].set_ylabel('||transfer - model ||^2')
 
 
 def longplotname(exp):

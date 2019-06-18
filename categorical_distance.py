@@ -279,7 +279,7 @@ def test_CategoricalModule():
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
                         is_init_symmetric=True, is_intervention_symmetric=False,
-                        batch_size=10):
+                        batch_size=10, rate_alpha=0, log_interval=10):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -310,41 +310,49 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     causaloptimizer = optim.SGD(causalmodules.parameters(), lr=lr)
     antioptimizer = optim.SGD(antimodules.parameters(), lr=lr)
 
-    ans = np.zeros([n, T + 1, 2, 2])
-    ans[:, 0, 0, 0] = transfer.kullback_leibler(causal)
-    ans[:, 0, 0, 1] = causal.scoredist(transfer)
-
-    ans[:, 0, 1, 0] = antitransfer.kullback_leibler(anticausal)
-    ans[:, 0, 1, 1] = anticausal.scoredist(antitransfer)
+    steps = [0]
+    kl_causal = [transfer.kullback_leibler(causal)]
+    scoredist_causal = [transfer.scoredist(causal)]
+    kl_anti = [antitransfer.kullback_leibler(anticausal)]
+    scoredist_anti = [antitransfer.scoredist(anticausal)]
 
     for t in tqdm.tqdm(range(1, T + 1)):
         aa, bb = transfer.sample(m=batch_size, return_tensor=True)
 
-        causaloptimizer.lr = lr / t ** (2 / 3)
+        causaloptimizer.lr = lr / t ** rate_alpha
         causaloptimizer.zero_grad()
         causalloss = - causalmodules(aa, bb).sum() / batch_size
         causalloss.backward()
         causaloptimizer.step()
 
-        antioptimizer.lr = lr / t ** (2 / 3)
+        antioptimizer.lr = lr / t ** rate_alpha
         antioptimizer.zero_grad()
         antiloss = - antimodules(bb, aa).sum() / batch_size
         antiloss.backward()
         antioptimizer.step()
 
-        causalstatic = causalmodules.to_static()
-        ans[:, t, 0, 0] = transfer.kullback_leibler(causalstatic)
-        ans[:, t, 0, 1] = transfer.scoredist(causalstatic)
+        if t % log_interval == 0:
+            steps.append(t)
 
-        antistatic = antimodules.to_static()
-        ans[:, t, 1, 0] = antitransfer.kullback_leibler(antistatic)
-        ans[:, t, 1, 1] = antitransfer.scoredist(antistatic)
+            causalstatic = causalmodules.to_static()
+            kl_causal.append(transfer.kullback_leibler(causalstatic))
+            scoredist_causal.append(transfer.scoredist(causalstatic))
 
-    return ans
+            antistatic = antimodules.to_static()
+            kl_anti.append(antitransfer.kullback_leibler(antistatic))
+            scoredist_anti.append(antitransfer.scoredist(antistatic))
+
+    return {
+        'steps': steps,
+        'kl_causal': np.array(kl_causal),
+        'scoredist_causal': np.array(scoredist_causal),
+        'kl_anti': np.array(kl_anti),
+        'scoredist_anti': np.array(scoredist_anti)
+    }
 
 
 def test_experiment_optimize():
-    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause')
+    print(experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause'))
 
 
 if __name__ == "__main__":

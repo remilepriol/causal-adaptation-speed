@@ -37,19 +37,18 @@ def all_distances():
         pickle.dump(results, fout)
 
 
-def optimize_distances():
+def optimize_distances(k =10):
     results = []
-    base_experiment = {'n': 5, 'k': 10, 'T': 3000, 'concentration': 1, 'intervention': 'cause'}
-    for lr in [0.01, 0.1, 1]:
-        experiment = {**base_experiment, 'lr': lr}
-        trajectory = categorical_distance.experiment_optimize(**experiment)
-        experiment['trajectory'] = trajectory
+    base_experiment = {'n': 5, 'k': k, 'T': 3000, 'concentration': 1, 'intervention': 'cause'}
+    for lr in [0.05, 0.1, .5]:
+        trajectory = categorical_distance.experiment_optimize(lr=lr, **base_experiment)
+        experiment = {**base_experiment, 'lr': lr, **trajectory}
         results.append(experiment)
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
 
-    with open(os.path.join(savedir, f'categorical_optimize_k={experiment["k"]}.pkl'), 'wb') as fout:
+    with open(os.path.join(savedir, f'categorical_optimize_k={k}.pkl'), 'wb') as fout:
         pickle.dump(results, fout)
 
 
