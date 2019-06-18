@@ -91,12 +91,12 @@ def longplot(exp, confidence=(5, 95)):
     lower = np.percentile(trajectory, confidence[0], axis=0)
     upper = np.percentile(trajectory, confidence[1], axis=0)
 
-    for i, ax in enumerate(axs) :
+    for i, ax in enumerate(axs):
+        ax.grid(True)
         for j, label in enumerate(['causal', 'anticausal']):
             ax.plot(mean_trajectory[:, j, i], label=label)
             ax.fill_between(np.arange(trajectory.shape[1]), lower[:, j, i], upper[:, j, i],
-                             alpha=.4, label='confidence {} %'.format(confidence[1] - confidence[0]))
-
+                            alpha=.4, label='confidence {} %'.format(confidence[1] - confidence[0]))
 
     axs[0].set_ylabel('KL(transfer, model)')
     axs[0].legend()

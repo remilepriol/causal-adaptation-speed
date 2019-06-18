@@ -39,8 +39,8 @@ def all_distances():
 
 def optimize_distances():
     results = []
-    base_experiment = {'n': 5, 'k': 10, 'T': 1000, 'concentration': 1, 'intervention': 'cause'}
-    for lr in [0.01, 0.1, 1, 10]:
+    base_experiment = {'n': 5, 'k': 10, 'T': 3000, 'concentration': 1, 'intervention': 'cause'}
+    for lr in [0.01, 0.1, 1]:
         experiment = {**base_experiment, 'lr': lr}
         trajectory = categorical_distance.experiment_optimize(**experiment)
         experiment['trajectory'] = trajectory
