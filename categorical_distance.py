@@ -231,7 +231,10 @@ class CategoricalModule(nn.Module):
         return self.to_joint()[a, b]
 
     def to_joint(self):
-        return F.log_softmax((self.sba + self.sa.unsqueeze(dim=1)).view(-1), dim=0).view(self.k, self.k)
+        return F.log_softmax(
+            (self.sba + self.sa.unsqueeze(dim=1)).view(-1),
+            dim=0
+        ).view(self.k, self.k)
 
     def to_static(self):
         return CategoricalStatic(logit2proba(self.sa.detach().unsqueeze(dim=0).numpy()),
@@ -262,7 +265,7 @@ def test_CategoricalModule():
 
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
-                        symmetric_init=True, symmetric_intervention=False):
+                        is_init_symmetric=True, is_intervention_symmetric=False):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -273,16 +276,16 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     and distance in scores for causal and anticausal directions.
 
     :param intervention: takes value 'cause' or 'effect'
-    :param symmetric_init: sample the causal parameters such that the marginals on a and b are
+    :param is_init_symmetric: sample the causal parameters such that the marginals on a and b are
     drawn from the same distribution
-    :param symmetric_intervention: sample the intervention parameters from the same law as the
+    :param is_intervention_symmetric: sample the intervention parameters from the same law as the
     initial parameters
     """
-    causal = sample_joint(k, n, concentration, symmetric_init)
+    causal = sample_joint(k, n, concentration, is_init_symmetric)
     transfer = causal.intervention(
         on=intervention,
         concentration=concentration,
-        fromjoint=symmetric_intervention
+        fromjoint=is_intervention_symmetric
     )
     anticausal = causal.reverse()
     antitransfer = transfer.reverse()
@@ -302,7 +305,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
 
     for t in tqdm.tqdm(range(1, T + 1)):
         aa, bb = transfer.sample(m=10)
-        optimizer.lr = lr/t**(2/3)
+        optimizer.lr = lr / t**(2/3)
         optimizer.zero_grad()
         loss = torch.sum(torch.stack([-m(a, b).mean() for m, a, b in zip(causalmodules, aa, bb)]))
         loss = loss + torch.sum(torch.stack([-m(b, a).mean() for m, a, b in zip(antimodules, aa, bb)]))
@@ -319,7 +322,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
             ans[i, t, 1, 0] = trans.kullback_leibler(static)
             ans[i, t, 1, 1] = trans.scoredist(static)
 
-        if t % 100 == 0:
+        if t % 500 == 0:
             current = logit2proba(causalmodules[0].to_joint().detach().numpy().flatten())
             goal = transfer[0].to_joint().flatten()
             # print(current, goal)
