@@ -125,13 +125,16 @@ class CategoricalStatic:
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
 
-    def sample(self, m):
+    def sample(self, m, return_tensor=False):
         """For each of the n distributions, return m samples. (n*m*2 array) """
         flatjoints = self.to_joint().reshape((self.n, self.k ** 2))
         samples = np.array([np.random.choice(self.k ** 2, size=m, p=p) for p in flatjoints])
         a = samples // self.k
         b = samples % self.k
-        return a, b
+        if not return_tensor:
+            return a, b
+        else:
+            return torch.from_numpy(a), torch.from_numpy(b)
 
     def __getitem__(self, item):
         return CategoricalStatic(self.marginal[[item]], self.conditional[[item]])
@@ -219,26 +222,38 @@ def test_experiment():
 
 
 class CategoricalModule(nn.Module):
-    """Represent 1 categorical conditionala as a pytorch module"""
+    """Represent n categorical conditionals as a pytorch module"""
 
     def __init__(self, joint: CategoricalStatic):
         super(CategoricalModule, self).__init__()
+        self.n = joint.n
         self.k = joint.k
-        self.sa = nn.Parameter(torch.tensor(joint.sa[0]))
-        self.sba = nn.Parameter(torch.tensor(joint.sba[0]))
+        self.sa = nn.Parameter(torch.tensor(joint.sa))
+        self.sba = nn.Parameter(torch.tensor(joint.sba))
 
     def forward(self, a, b):
-        return self.to_joint()[a, b]
+        """
+        :param a: n*m collection of m class in {1,..., k} observed
+        for each of the n models
+        :param b: n*m like a
+        :return: the log-probability of observing a,b,
+        where model 1 explains first row of a,b,
+        model 2 explains row 2 and so forth.
+        """
+        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1])
+        return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)]
 
     def to_joint(self):
         return F.log_softmax(
-            (self.sba + self.sa.unsqueeze(dim=1)).view(-1),
-            dim=0
-        ).view(self.k, self.k)
+            (self.sba + self.sa.unsqueeze(dim=2)).view(self.n, self.k ** 2),
+            dim=1
+        ).view(self.n, self.k, self.k)
 
     def to_static(self):
-        return CategoricalStatic(logit2proba(self.sa.detach().unsqueeze(dim=0).numpy()),
-                                 logit2proba(self.sba.detach().unsqueeze(dim=0).numpy()))
+        return CategoricalStatic(
+            logit2proba(self.sa.detach().numpy()),
+            logit2proba(self.sba.detach().numpy())
+        )
 
     def __repr__(self):
         return f"CategoricalModule(joint={self.to_joint().detach()})"
@@ -249,23 +264,22 @@ def test_CategoricalModule():
     references = sample_joint(5, 10, 1)
     intervened = references.intervention(on='cause', concentration=1)
 
-    modules = [CategoricalModule(r) for r in references]
-    allparameters = [param for m in modules for param in m.parameters()]
-    optimizer = optim.SGD(allparameters, lr=1)
+    modules = CategoricalModule(references)
+    optimizer = optim.SGD(modules.parameters(), lr=1)
 
-    aa, bb = intervened.sample(13)
-    negativeloglikelihoods = [-m(a, b).mean() for m, a, b in zip(modules, aa, bb)]
-    for ll in negativeloglikelihoods:
-        optimizer.zero_grad()
-        ll.backward()
-        optimizer.step()
+    aa, bb = intervened.sample(13, return_tensor=True)
+    negativeloglikelihoods = -modules(aa, bb).mean()
+    optimizer.zero_grad()
+    negativeloglikelihoods.backward()
+    optimizer.step()
 
-    updated = [m.to_static() for m in modules]
+    updated = modules.to_static()
     kls = [i.kullback_leibler(u) for i, u in zip(intervened, updated)]
 
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
-                        is_init_symmetric=True, is_intervention_symmetric=False):
+                        is_init_symmetric=True, is_intervention_symmetric=False,
+                        batch_size=10):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -290,11 +304,11 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     anticausal = causal.reverse()
     antitransfer = transfer.reverse()
 
-    causalmodules = [CategoricalModule(d) for d in causal]
-    antimodules = [CategoricalModule(d) for d in anticausal]
-    modules = causalmodules + antimodules
-    allparameters = [param for m in modules for param in m.parameters()]
-    optimizer = optim.SGD(allparameters, lr=lr)
+    causalmodules = CategoricalModule(causal)
+    antimodules = CategoricalModule(anticausal)
+
+    causaloptimizer = optim.SGD(causalmodules.parameters(), lr=lr)
+    antioptimizer = optim.SGD(antimodules.parameters(), lr=lr)
 
     ans = np.zeros([n, T + 1, 2, 2])
     ans[:, 0, 0, 0] = transfer.kullback_leibler(causal)
@@ -304,36 +318,33 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     ans[:, 0, 1, 1] = anticausal.scoredist(antitransfer)
 
     for t in tqdm.tqdm(range(1, T + 1)):
-        aa, bb = transfer.sample(m=10)
-        optimizer.lr = lr / t**(2/3)
-        optimizer.zero_grad()
-        loss = torch.sum(torch.stack([-m(a, b).mean() for m, a, b in zip(causalmodules, aa, bb)]))
-        loss = loss + torch.sum(torch.stack([-m(b, a).mean() for m, a, b in zip(antimodules, aa, bb)]))
-        loss.backward()
-        optimizer.step()
+        aa, bb = transfer.sample(m=batch_size, return_tensor=True)
 
-        for i, (trans, module) in enumerate(zip(transfer, causalmodules)):
-            static = module.to_static()
-            ans[i, t, 0, 0] = trans.kullback_leibler(static)
-            ans[i, t, 0, 1] = trans.scoredist(static)
+        causaloptimizer.lr = lr / t ** (2 / 3)
+        causaloptimizer.zero_grad()
+        causalloss = - causalmodules(aa, bb).sum() / batch_size
+        causalloss.backward()
+        causaloptimizer.step()
 
-        for i, (trans, module) in enumerate(zip(antitransfer, antimodules)):
-            static = module.to_static()
-            ans[i, t, 1, 0] = trans.kullback_leibler(static)
-            ans[i, t, 1, 1] = trans.scoredist(static)
+        antioptimizer.lr = lr / t ** (2 / 3)
+        antioptimizer.zero_grad()
+        antiloss = - antimodules(bb, aa).sum() / batch_size
+        antiloss.backward()
+        antioptimizer.step()
 
-        if t % 500 == 0:
-            current = logit2proba(causalmodules[0].to_joint().detach().numpy().flatten())
-            goal = transfer[0].to_joint().flatten()
-            # print(current, goal)
-            # print(aa * k + bb)
-            # print(causalmodules[0](aa[0], bb[0]))
+        causalstatic = causalmodules.to_static()
+        ans[:, t, 0, 0] = transfer.kullback_leibler(causalstatic)
+        ans[:, t, 0, 1] = transfer.scoredist(causalstatic)
+
+        antistatic = antimodules.to_static()
+        ans[:, t, 1, 0] = antitransfer.kullback_leibler(antistatic)
+        ans[:, t, 1, 1] = antitransfer.scoredist(antistatic)
 
     return ans
 
 
 def test_experiment_optimize():
-    experiment_optimize(k=2, n=1, T=1000, lr=1, concentration=1, intervention='cause')
+    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause')
 
 
 if __name__ == "__main__":
