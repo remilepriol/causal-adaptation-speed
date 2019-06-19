@@ -77,29 +77,49 @@ def optim_plot():
     os.makedirs(plotdir, exist_ok=True)
 
     for exp in tqdm.tqdm(results):
-        longplot(exp)
-        plt.savefig(os.path.join(plotdir, longplotname(exp)))
+        longplot(exp, statistics=True)
+        plt.savefig(os.path.join(plotdir, 'average_'+longplotname(exp)))
+        longplot(exp, statistics=False)
+        plt.savefig(os.path.join(plotdir, 'curves_' + longplotname(exp)))
         plt.close()
 
 
-def longplot(exp, confidence=(5, 95)):
+def longplot(exp, confidence=(5, 95), statistics=True):
     """Draw mean trajectory plot with percentiles"""
+    colors = {'causal':'blue', 'anti':'red'}
     fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(10, 8))
     for ax, metric in zip(axs, ['kl', 'scoredist']):
         ax.grid(True)
+        ax.set_yscale('log')
         for model_family in ['causal', 'anti']:
             values = exp[metric + '_' + model_family]
 
-            ax.plot(exp['steps'], values.mean(axis=1), label=model_family)
-            ax.fill_between(
-                exp['steps'],
-                np.percentile(values, confidence[0], axis=1),
-                np.percentile(values, confidence[1], axis=1),
-                alpha=.4,
-                label='confidence {} %'.format(confidence[1] - confidence[0]))
+            if statistics:  # plot mean and percentile statistics
+                ax.plot(
+                    exp['steps'],
+                    values.mean(axis=1),
+                    label=model_family
+                )
+                ax.fill_between(
+                    exp['steps'],
+                    np.percentile(values, confidence[0], axis=1),
+                    np.percentile(values, confidence[1], axis=1),
+                    alpha=.4,
+                    label='confidence {} %'.format(
+                        confidence[1] - confidence[0])
+                )
+            else:
+                ax.plot(
+                    exp['steps'],
+                    values,
+                    alpha=.1,
+                    color=colors[model_family],
+                    label=model_family
+                )
 
     axs[0].set_ylabel('KL(transfer, model)')
-    axs[0].legend()
+    if statistics:
+        axs[0].legend()
     axs[1].set_ylabel('||transfer - model ||^2')
 
 
