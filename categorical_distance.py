@@ -41,6 +41,15 @@ def joint2conditional(joint):
     return CategoricalStatic(marginal, conditional)
 
 
+def jointlogit2conditional(joint):
+    sa = logsumexp(joint)
+    sa -= sa.mean(axis=1, keepdims=True)
+    sba = joint - sa[:, :, np.newaxis]
+    sba -= sba.mean(axis=2, keepdims=True)
+
+    return CategoricalStatic(sa, sba, from_probas=False)
+
+
 def sample_joint(k, n, concentration, symmetric=True):
     """Sample n causal mechanisms of categorical variables of dimension K."""
     if symmetric:
@@ -55,46 +64,52 @@ def sample_joint(k, n, concentration, symmetric=True):
 class CategoricalStatic:
     """Represent n categorical distributions of variables (a,b) of dimension k each."""
 
-    def __init__(self, marginal, conditional):
+    def __init__(self, marginal, conditional, from_probas=True):
         """The distribution is represented by a marginal p(a) and a conditional p(b|a)
 
         marginal is n*k array.
         conditional is n*k*k array. Each element conditional[i,j,k] is p_i(b=k |a=j)
         """
-        self.n = marginal.shape[0]
-        self.k = marginal.shape[1]
+        self.n, self.k = marginal.shape
 
-        s = conditional.shape
-        assert s[0] == self.n
-        assert s[1] == self.k and s[2] == self.k
-        assert np.allclose(marginal.sum(axis=-1), np.ones(self.n))
-        assert np.allclose(conditional.sum(axis=-1), np.ones((self.n, self.k)))
+        if not conditional.shape == (self.n, self.k, self.k):
+            raise ValueError(f'Marginal shape {marginal.shape} and conditional '
+                             f'shape {conditional.shape} do not match.')
 
-        self.marginal = marginal
-        self.conditional = conditional
+        if from_probas:
+            self.marginal = marginal
+            self.conditional = conditional
+            self.sa = proba2logit(marginal)
+            self.sba = proba2logit(conditional)
+        else:
+            self.marginal = logit2proba(marginal)
+            self.conditional = logit2proba(conditional)
+            self.sa = marginal
+            self.sba = conditional
 
-        self.sa = proba2logit(self.marginal)
-        self.sba = proba2logit(self.conditional)
-
-    def to_joint(self):
-        return self.conditional * np.expand_dims(self.marginal, axis=-1)
+    def to_joint(self, return_probas=True):
+        if return_probas:
+            return self.conditional * self.marginal[:, :, np.newaxis]
+        else:  # return logits
+            joint = self.sba + (self.sa - logsumexp(self.sba))[:, :, np.newaxis]
+            return joint - np.mean(joint, axis=(1, 2), keepdims=True)
 
     def reverse(self):
         """Return conditional from b to a.
         Compute marginal pb and conditional pab such that pab*pb = pba*pa.
         """
-        joint = self.to_joint()
-        joint = np.swapaxes(joint, -1, -2)  # invert variables
-        return joint2conditional(joint)
+        joint = self.to_joint(return_probas=False)
+        joint = np.swapaxes(joint, 1, 2)  # invert variables
+        return jointlogit2conditional(joint)
 
     def probadist(self, other):
-        pd = np.sum((self.marginal - other.marginal) ** 2, axis=(-1))
-        pd += np.sum((self.conditional - other.conditional) ** 2, axis=(-1, -2))
+        pd = np.sum((self.marginal - other.marginal) ** 2, axis=1)
+        pd += np.sum((self.conditional - other.conditional) ** 2, axis=(1, 2))
         return pd
 
     def scoredist(self, other):
-        sd = np.sum((self.sa - other.sa) ** 2, axis=(-1))
-        sd += np.sum((self.sba - other.sba) ** 2, axis=(-1, -2))
+        sd = np.sum((self.sa - other.sa) ** 2, axis=1)
+        sd += np.sum((self.sba - other.sba) ** 2, axis=(1, 2))
         return sd
 
     def sqdistance(self, other):
@@ -137,21 +152,7 @@ class CategoricalStatic:
             return torch.from_numpy(a), torch.from_numpy(b)
 
     def to_module(self):
-        return CategoricalModule(self)
-
-    def __getitem__(self, item):
-        return CategoricalStatic(self.marginal[[item]], self.conditional[[item]])
-
-    def __iter__(self):
-        self.i = 0
-        return self
-
-    def __next__(self):
-        if self.i < self.n:
-            ans = CategoricalStatic(self.marginal[self.i:self.i + 1], self.conditional[self.i:self.i + 1])
-            self.i += 1
-            return ans
-        raise StopIteration()
+        return CategoricalModule(self.sa, self.sba)
 
     def __repr__(self):
         return (f"n={self.n} categorical of dimension k={self.k}\n"
@@ -227,12 +228,11 @@ def test_experiment():
 class CategoricalModule(nn.Module):
     """Represent n categorical conditionals as a pytorch module"""
 
-    def __init__(self, joint: CategoricalStatic):
+    def __init__(self, sa, sba):
         super(CategoricalModule, self).__init__()
-        self.n = joint.n
-        self.k = joint.k
-        self.sa = nn.Parameter(torch.tensor(joint.sa))
-        self.sba = nn.Parameter(torch.tensor(joint.sba))
+        self.n, self.k = tuple(sa.shape)
+        self.sa = nn.Parameter(torch.tensor(sa))
+        self.sba = nn.Parameter(torch.tensor(sba))
 
     def forward(self, a, b):
         """
@@ -270,12 +270,12 @@ class CategoricalModule(nn.Module):
         return f"CategoricalModule(joint={self.to_joint().detach()})"
 
 
-def test_CategoricalModule():
+def test_CategoricalModule(n=7, k=5):
     print('test categorical module')
-    references = sample_joint(5, 10, 1)
+    references = sample_joint(k, n, 1)
     intervened = references.intervention(on='cause', concentration=1)
 
-    modules = CategoricalModule(references)
+    modules = CategoricalModule(references.sa, references.sba)
     optimizer = optim.SGD(modules.parameters(), lr=1)
 
     aa, bb = intervened.sample(13, return_tensor=True)
@@ -287,6 +287,10 @@ def test_CategoricalModule():
     imodules = intervened.to_module()
     imodules.kullback_leibler(modules)
     imodules.scoredist(modules)
+
+    # test that reverse is numerically stable
+    kls = references.reverse().reverse().to_module().kullback_leibler(modules)
+    assert torch.allclose(torch.zeros(n, dtype=torch.double), kls), kls
 
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
@@ -316,20 +320,23 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     anticausal = causal.reverse()
     antitransfer = transfer.reverse()
 
-    causalmodules = CategoricalModule(causal)
-    antimodules = CategoricalModule(anticausal)
+    causal = causal.to_module()
+    anticausal = anticausal.to_module()
+    transfer = transfer.to_module()
+    antitransfer = antitransfer.to_module()
 
-    causaloptimizer = optim.SGD(causalmodules.parameters(), lr=lr)
-    antioptimizer = optim.SGD(antimodules.parameters(), lr=lr)
+    causaloptimizer = optim.SGD(causal.parameters(), lr=lr)
+    antioptimizer = optim.SGD(anticausal.parameters(), lr=lr)
 
-    transferm = transfer.to_module()
-    antitransferm = antitransfer.to_module()
+    print(transfer.kullback_leibler(causal)
+          - antitransfer.kullback_leibler(anticausal))
+    return
     steps = [0]
     with torch.no_grad():
-        kl_causal = [transferm.kullback_leibler(causalmodules)]
-        scoredist_causal = [transferm.scoredist(causalmodules)]
-        kl_anti = [antitransferm.kullback_leibler(antimodules)]
-        scoredist_anti = [antitransferm.scoredist(antimodules)]
+        kl_causal = [transfer.kullback_leibler(causal)]
+        scoredist_causal = [transfer.scoredist(causal)]
+        kl_anti = [antitransfer.kullback_leibler(anticausal)]
+        scoredist_anti = [antitransfer.scoredist(anticausal)]
 
     for t in tqdm.tqdm(range(1, T + 1)):
         # aa, bb = transfer.sample(m=batch_size, return_tensor=True)
@@ -337,14 +344,14 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
         causaloptimizer.lr = lr / t ** scheduler_exponent
         causaloptimizer.zero_grad()
         # causalloss = - causalmodules(aa, bb).sum() / batch_size
-        causalloss = transferm.kullback_leibler(causalmodules).sum()
+        causalloss = transfer.kullback_leibler(causal).sum()
         causalloss.backward()
         causaloptimizer.step()
 
         antioptimizer.lr = lr / t ** scheduler_exponent
         antioptimizer.zero_grad()
         # antiloss = - antimodules(bb, aa).sum() / batch_size
-        antiloss = antitransferm.kullback_leibler(antimodules).sum()
+        antiloss = antitransfer.kullback_leibler(anticausal).sum()
         antiloss.backward()
         antioptimizer.step()
 
@@ -352,11 +359,11 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
             steps.append(t)
 
             with torch.no_grad():
-                kl_causal.append(transferm.kullback_leibler(causalmodules))
-                scoredist_causal.append(transferm.scoredist(causalmodules))
+                kl_causal.append(transfer.kullback_leibler(causal))
+                scoredist_causal.append(transfer.scoredist(causal))
 
-                kl_anti.append(antitransferm.kullback_leibler(antimodules))
-                scoredist_anti.append(antitransferm.scoredist(antimodules))
+                kl_anti.append(antitransfer.kullback_leibler(anticausal))
+                scoredist_anti.append(antitransfer.scoredist(anticausal))
 
     return {
         'steps': steps,
