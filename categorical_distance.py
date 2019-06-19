@@ -136,6 +136,9 @@ class CategoricalStatic:
         else:
             return torch.from_numpy(a), torch.from_numpy(b)
 
+    def to_module(self):
+        return CategoricalModule(self)
+
     def __getitem__(self, item):
         return CategoricalStatic(self.marginal[[item]], self.conditional[[item]])
 
@@ -255,6 +258,14 @@ class CategoricalModule(nn.Module):
             logit2proba(self.sba.detach().numpy())
         )
 
+    def kullback_leibler(self, other):
+        joint = self.to_joint()
+        return torch.sum((joint - other.to_joint()) * torch.exp(joint), dim=(1, 2))
+
+    def scoredist(self, other):
+        return torch.sum((self.sa - other.sa) ** 2, dim=1) \
+               + torch.sum((self.sba - other.sba) ** 2, dim=(1, 2))
+
     def __repr__(self):
         return f"CategoricalModule(joint={self.to_joint().detach()})"
 
@@ -273,8 +284,9 @@ def test_CategoricalModule():
     negativeloglikelihoods.backward()
     optimizer.step()
 
-    updated = modules.to_static()
-    kls = [i.kullback_leibler(u) for i, u in zip(intervened, updated)]
+    imodules = intervened.to_module()
+    imodules.kullback_leibler(modules)
+    imodules.scoredist(modules)
 
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
@@ -310,49 +322,53 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     causaloptimizer = optim.SGD(causalmodules.parameters(), lr=lr)
     antioptimizer = optim.SGD(antimodules.parameters(), lr=lr)
 
+    transferm = transfer.to_module()
+    antitransferm = antitransfer.to_module()
     steps = [0]
-    kl_causal = [transfer.kullback_leibler(causal)]
-    scoredist_causal = [transfer.scoredist(causal)]
-    kl_anti = [antitransfer.kullback_leibler(anticausal)]
-    scoredist_anti = [antitransfer.scoredist(anticausal)]
+    with torch.no_grad():
+        kl_causal = [transferm.kullback_leibler(causalmodules)]
+        scoredist_causal = [transferm.scoredist(causalmodules)]
+        kl_anti = [antitransferm.kullback_leibler(antimodules)]
+        scoredist_anti = [antitransferm.scoredist(antimodules)]
 
     for t in tqdm.tqdm(range(1, T + 1)):
-        aa, bb = transfer.sample(m=batch_size, return_tensor=True)
+        # aa, bb = transfer.sample(m=batch_size, return_tensor=True)
 
         causaloptimizer.lr = lr / t ** scheduler_exponent
         causaloptimizer.zero_grad()
-        causalloss = - causalmodules(aa, bb).sum() / batch_size
+        # causalloss = - causalmodules(aa, bb).sum() / batch_size
+        causalloss = transferm.kullback_leibler(causalmodules).sum()
         causalloss.backward()
         causaloptimizer.step()
 
         antioptimizer.lr = lr / t ** scheduler_exponent
         antioptimizer.zero_grad()
-        antiloss = - antimodules(bb, aa).sum() / batch_size
+        # antiloss = - antimodules(bb, aa).sum() / batch_size
+        antiloss = antitransferm.kullback_leibler(antimodules).sum()
         antiloss.backward()
         antioptimizer.step()
 
         if t % log_interval == 0:
             steps.append(t)
 
-            causalstatic = causalmodules.to_static()
-            kl_causal.append(transfer.kullback_leibler(causalstatic))
-            scoredist_causal.append(transfer.scoredist(causalstatic))
+            with torch.no_grad():
+                kl_causal.append(transferm.kullback_leibler(causalmodules))
+                scoredist_causal.append(transferm.scoredist(causalmodules))
 
-            antistatic = antimodules.to_static()
-            kl_anti.append(antitransfer.kullback_leibler(antistatic))
-            scoredist_anti.append(antitransfer.scoredist(antistatic))
+                kl_anti.append(antitransferm.kullback_leibler(antimodules))
+                scoredist_anti.append(antitransferm.scoredist(antimodules))
 
     return {
         'steps': steps,
-        'kl_causal': np.array(kl_causal),
-        'scoredist_causal': np.array(scoredist_causal),
-        'kl_anti': np.array(kl_anti),
-        'scoredist_anti': np.array(scoredist_anti)
+        'kl_causal': torch.stack(kl_causal).numpy(),
+        'scoredist_causal': torch.stack(scoredist_causal).numpy(),
+        'kl_anti': torch.stack(kl_anti).numpy(),
+        'scoredist_anti': torch.stack(scoredist_anti).numpy()
     }
 
 
 def test_experiment_optimize():
-    print(experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause'))
+    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause')
 
 
 if __name__ == "__main__":
