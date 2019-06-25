@@ -247,10 +247,7 @@ class CategoricalModule(nn.Module):
         return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)]
 
     def to_joint(self):
-        return F.log_softmax(
-            (self.sba + self.sa.unsqueeze(dim=2)).view(self.n, self.k ** 2),
-            dim=1
-        ).view(self.n, self.k, self.k)
+        return F.log_softmax(self.sba, dim=2) + F.log_softmax(self.sa, dim=1).unsqueeze(dim=2)
 
     def to_static(self):
         return CategoricalStatic(
@@ -275,9 +272,14 @@ def test_CategoricalModule(n=7, k=5):
     references = sample_joint(k, n, 1)
     intervened = references.intervention(on='cause', concentration=1)
 
-    modules = CategoricalModule(references.sa, references.sba)
-    optimizer = optim.SGD(modules.parameters(), lr=1)
+    modules = references.to_module()
 
+    # test that reverse is numerically stable
+    kls = references.reverse().reverse().to_module().kullback_leibler(modules)
+    assert torch.allclose(torch.zeros(n, dtype=torch.double), kls), kls
+
+    # test optimization
+    optimizer = optim.SGD(modules.parameters(), lr=1)
     aa, bb = intervened.sample(13, return_tensor=True)
     negativeloglikelihoods = -modules(aa, bb).mean()
     optimizer.zero_grad()
@@ -287,10 +289,6 @@ def test_CategoricalModule(n=7, k=5):
     imodules = intervened.to_module()
     imodules.kullback_leibler(modules)
     imodules.scoredist(modules)
-
-    # test that reverse is numerically stable
-    kls = references.reverse().reverse().to_module().kullback_leibler(modules)
-    assert torch.allclose(torch.zeros(n, dtype=torch.double), kls), kls
 
 
 def experiment_optimize(k, n, T, lr, concentration, intervention,
@@ -311,26 +309,20 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     :param is_intervention_symmetric: sample the intervention parameters from the same law as the
     initial parameters
     """
-    causal = sample_joint(k, n, concentration, is_init_symmetric)
-    transfer = causal.intervention(
+    causalstatic = sample_joint(k, n, concentration, is_init_symmetric)
+    transferstatic = causalstatic.intervention(
         on=intervention,
         concentration=concentration,
         fromjoint=is_intervention_symmetric
     )
-    anticausal = causal.reverse()
-    antitransfer = transfer.reverse()
-
-    causal = causal.to_module()
-    anticausal = anticausal.to_module()
-    transfer = transfer.to_module()
-    antitransfer = antitransfer.to_module()
+    causal = causalstatic.to_module()
+    transfer = transferstatic.to_module()
+    anticausal = causalstatic.reverse().to_module()
+    antitransfer = transferstatic.reverse().to_module()
 
     causaloptimizer = optim.SGD(causal.parameters(), lr=lr)
     antioptimizer = optim.SGD(anticausal.parameters(), lr=lr)
 
-    print(transfer.kullback_leibler(causal)
-          - antitransfer.kullback_leibler(anticausal))
-    return
     steps = [0]
     with torch.no_grad():
         kl_causal = [transfer.kullback_leibler(causal)]
@@ -339,20 +331,23 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
         scoredist_anti = [antitransfer.scoredist(anticausal)]
 
     for t in tqdm.tqdm(range(1, T + 1)):
-        # aa, bb = transfer.sample(m=batch_size, return_tensor=True)
 
         causaloptimizer.lr = lr / t ** scheduler_exponent
-        causaloptimizer.zero_grad()
-        # causalloss = - causalmodules(aa, bb).sum() / batch_size
-        causalloss = transfer.kullback_leibler(causal).sum()
-        causalloss.backward()
-        causaloptimizer.step()
-
         antioptimizer.lr = lr / t ** scheduler_exponent
+        causaloptimizer.zero_grad()
         antioptimizer.zero_grad()
-        # antiloss = - antimodules(bb, aa).sum() / batch_size
-        antiloss = antitransfer.kullback_leibler(anticausal).sum()
+
+        if batch_size == 'full':
+            causalloss = transfer.kullback_leibler(causal).sum()
+            antiloss = antitransfer.kullback_leibler(anticausal).sum()
+        else:
+            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
+            causalloss = - causal(aa, bb).sum() / batch_size
+            antiloss = - anticausal(bb, aa).sum() / batch_size
+
+        causalloss.backward()
         antiloss.backward()
+        causaloptimizer.step()
         antioptimizer.step()
 
         if t % log_interval == 0:
@@ -366,7 +361,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
                 scoredist_anti.append(antitransfer.scoredist(anticausal))
 
     return {
-        'steps': steps,
+        'steps': np.array(steps),
         'kl_causal': torch.stack(kl_causal).numpy(),
         'scoredist_causal': torch.stack(scoredist_causal).numpy(),
         'kl_anti': torch.stack(kl_anti).numpy(),
