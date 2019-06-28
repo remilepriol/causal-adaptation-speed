@@ -92,7 +92,7 @@ def optim_plot():
         print(longplotname(exp))
         longplot(exp, statistics=True, plot_bound=False)
         plt.savefig(os.path.join(plotdir, 'average_' + longplotname(exp)))
-        # longplot(exp, statistics=False)
+        # curve_plot(exp, statistics=False)
         # plt.savefig(os.path.join(plotdir, 'curves_' + longplotname(exp)))
         optim_scatter(exp)
         plt.savefig(os.path.join(plotdir, 'scatter_' + longplotname(exp)))
