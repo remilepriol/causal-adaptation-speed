@@ -18,7 +18,8 @@ def all_distances():
                     distances = []
                     for k in kk:
                         distances.append(categorical_distance.experiment(
-                            k, n, 1, intervention, symmetric_init, symmetric_intervention))
+                            k, n, 1, intervention, symmetric_init,
+                            symmetric_intervention))
 
                     exp = {
                         'intervention': intervention,
@@ -33,29 +34,35 @@ def all_distances():
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
 
-    with open(os.path.join(savedir, f'categorical_distances_{n}.pkl'), 'wb') as fout:
+    with open(os.path.join(
+            savedir, f'categorical_distances_{n}.pkl'), 'wb') as fout:
         pickle.dump(results, fout)
 
 
 def optimize_distances(k=10):
     results = []
     base_experiment = {
-        'n': 100, 'k': k, 'T': 1500,
-        'batch_size': 10, 'scheduler_exponent': 0,
-        'concentration': 1, 'intervention': 'effect'
+        'n': 100, 'k': k, 'T': 1500, 'n0': 10,
+        'batch_size': 1, 'scheduler_exponent': 0,
+        'concentration': 1, 'intervention': 'cause'
     }
     # for lr in [0.01, 0.05, 0.1]:
     for lr in [0.01, 0.1, .5]:
-        trajectory = categorical_distance.experiment_optimize(lr=lr, **base_experiment)
+        trajectory = categorical_distance.experiment_optimize(
+            lr=lr, **base_experiment)
         experiment = {**base_experiment, 'lr': lr, **trajectory}
         results.append(experiment)
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
-    with open(os.path.join(savedir, f'categorical_optimize_k={k}.pkl'), 'rb') as fin:
-        previous_results = pickle.load(fin)
+    savefile = os.path.join(savedir, f'categorical_optimize_k={k}.pkl')
+    if os.path.exists(savefile):
+        with open(savefile, 'rb') as fin:
+            previous_results = pickle.load(fin)
+    else:
+        previous_results = []
 
-    with open(os.path.join(savedir, f'categorical_optimize_k={k}.pkl'), 'wb') as fout:
+    with open(savefile, 'wb') as fout:
         pickle.dump(previous_results + results, fout)
 
 

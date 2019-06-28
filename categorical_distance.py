@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import tqdm
 import torch
@@ -17,7 +18,8 @@ def proba2logit(p):
 
 def logsumexp(s):
     smax = np.amax(s, axis=-1)
-    return smax + np.log(np.sum(np.exp(s - np.expand_dims(smax, axis=-1)), axis=-1))
+    return smax + np.log(
+        np.sum(np.exp(s - np.expand_dims(smax, axis=-1)), axis=-1))
 
 
 def logit2proba(s):
@@ -53,7 +55,8 @@ def jointlogit2conditional(joint):
 def sample_joint(k, n, concentration, symmetric=True):
     """Sample n causal mechanisms of categorical variables of dimension K."""
     if symmetric:
-        joint = np.random.dirichlet(concentration * np.ones(k ** 2), size=n).reshape((n, k, k))
+        joint = np.random.dirichlet(concentration * np.ones(k ** 2),
+                                    size=n).reshape((n, k, k))
         return joint2conditional(joint)
     else:
         pa = np.random.dirichlet(concentration * np.ones(k), size=n)
@@ -73,8 +76,9 @@ class CategoricalStatic:
         self.n, self.k = marginal.shape
 
         if not conditional.shape == (self.n, self.k, self.k):
-            raise ValueError(f'Marginal shape {marginal.shape} and conditional '
-                             f'shape {conditional.shape} do not match.')
+            raise ValueError(
+                f'Marginal shape {marginal.shape} and conditional '
+                f'shape {conditional.shape} do not match.')
 
         if from_probas:
             self.marginal = marginal
@@ -91,7 +95,8 @@ class CategoricalStatic:
         if return_probas:
             return self.conditional * self.marginal[:, :, np.newaxis]
         else:  # return logits
-            joint = self.sba + (self.sa - logsumexp(self.sba))[:, :, np.newaxis]
+            joint = self.sba \
+                    + (self.sa - logsumexp(self.sba))[:, :, np.newaxis]
             return joint - np.mean(joint, axis=(1, 2), keepdims=True)
 
     def reverse(self):
@@ -129,9 +134,11 @@ class CategoricalStatic:
             newmarginal = self.reverse().marginal
         else:
             if fromjoint:
-                newmarginal = sample_joint(self.k, self.n, concentration, symmetric=True).marginal
+                newmarginal = sample_joint(self.k, self.n, concentration,
+                                           symmetric=True).marginal
             else:
-                newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
+                newmarginal = np.random.dirichlet(
+                    concentration * np.ones(self.k), size=self.n)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
@@ -143,7 +150,8 @@ class CategoricalStatic:
     def sample(self, m, return_tensor=False):
         """For each of the n distributions, return m samples. (n*m*2 array) """
         flatjoints = self.to_joint().reshape((self.n, self.k ** 2))
-        samples = np.array([np.random.choice(self.k ** 2, size=m, p=p) for p in flatjoints])
+        samples = np.array(
+            [np.random.choice(self.k ** 2, size=m, p=p) for p in flatjoints])
         a = samples // self.k
         b = samples % self.k
         if not return_tensor:
@@ -222,7 +230,8 @@ def test_experiment():
     for intervention in ['cause', 'effect', 'independent']:
         for symmetric_init in [True, False]:
             for symmetric_intervention in [True, False]:
-                experiment(2, 3, 1, intervention, symmetric_init, symmetric_intervention)
+                experiment(2, 3, 1, intervention, symmetric_init,
+                           symmetric_intervention)
 
 
 class CategoricalModule(nn.Module):
@@ -247,7 +256,8 @@ class CategoricalModule(nn.Module):
         return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)]
 
     def to_joint(self):
-        return F.log_softmax(self.sba, dim=2) + F.log_softmax(self.sa, dim=1).unsqueeze(dim=2)
+        return F.log_softmax(self.sba, dim=2) \
+               + F.log_softmax(self.sa, dim=1).unsqueeze(dim=2)
 
     def to_static(self):
         return CategoricalStatic(
@@ -257,7 +267,8 @@ class CategoricalModule(nn.Module):
 
     def kullback_leibler(self, other):
         joint = self.to_joint()
-        return torch.sum((joint - other.to_joint()) * torch.exp(joint), dim=(1, 2))
+        return torch.sum((joint - other.to_joint()) * torch.exp(joint),
+                         dim=(1, 2))
 
     def scoredist(self, other):
         return torch.sum((self.sa - other.sa) ** 2, dim=1) \
@@ -291,9 +302,38 @@ def test_CategoricalModule(n=7, k=5):
     imodules.scoredist(modules)
 
 
+class MaximumLikelihoodEstimator:
+
+    def __init__(self, n, k):
+        self.counts = torch.ones((n, k, k), dtype=torch.double)
+
+    @property
+    def total(self):
+        return self.counts.sum(dim=(1, 2))
+
+    @property
+    def frequencies(self):
+        return self.counts / self.total.unsqueeze(1).unsqueeze(2)
+
+    def update(self, a, b):
+        rows = torch.arange(0, len(a)).unsqueeze(1).repeat(1, a.shape[1])
+        self.counts[rows.view(-1), a.view(-1), b.view(-1)] += 1
+
+    def to_joint(self):
+        return torch.log(self.frequencies)
+
+
+def init_mle(n0: int, static: CategoricalStatic):
+    mle = MaximumLikelihoodEstimator(static.n, static.k)
+    mle.counts = n0 * torch.from_numpy(static.to_joint(return_probas=True))
+    return mle
+
+
 def experiment_optimize(k, n, T, lr, concentration, intervention,
-                        is_init_symmetric=True, is_intervention_symmetric=False,
-                        batch_size=10, scheduler_exponent=0, log_interval=10):
+                        is_init_symmetric=True,
+                        is_intervention_symmetric=False,
+                        batch_size=10, scheduler_exponent=0, n0=10,
+                        log_interval=10):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -320,15 +360,31 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     anticausal = causalstatic.reverse().to_module()
     antitransfer = transferstatic.reverse().to_module()
 
-    causaloptimizer = optim.SGD(causal.parameters(), lr=lr)
-    antioptimizer = optim.SGD(anticausal.parameters(), lr=lr)
+    optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0,
+                 'weight_decay': 0}
+    causaloptimizer = optim.ASGD(causal.parameters(), **optkwargs)
+    antioptimizer = optim.ASGD(anticausal.parameters(), **optkwargs)
+
+    countestimator = MaximumLikelihoodEstimator(n, k)
+    priorestimator = init_mle(n0, causalstatic)
 
     steps = [0]
+    ans = {}
     with torch.no_grad():
-        kl_causal = [transfer.kullback_leibler(causal)]
-        scoredist_causal = [transfer.scoredist(causal)]
-        kl_anti = [antitransfer.kullback_leibler(anticausal)]
-        scoredist_anti = [antitransfer.scoredist(anticausal)]
+        ans['kl_causal']= [transfer.kullback_leibler(causal)]
+        ans['scoredist_causal'] = [transfer.scoredist(causal)]
+
+        ans['kl_anti']= [antitransfer.kullback_leibler(anticausal)]
+        ans['scoredist_anti']= [antitransfer.scoredist(anticausal)]
+
+        ans['kl_causal_average'] = [transfer.kullback_leibler(causal)]
+        ans['scoredist_causal_average'] = [transfer.scoredist(causal)]
+
+        ans['kl_anti_average'] = [antitransfer.kullback_leibler(anticausal)]
+        ans['scoredist_anti_average'] = [antitransfer.scoredist(anticausal)]
+
+        ans['kl_MAP_uniform'] = [transfer.kullback_leibler(countestimator)]
+        ans['kl_MAP_source'] = [transfer.kullback_leibler(priorestimator)]
 
     for t in tqdm.tqdm(range(1, T + 1)):
 
@@ -344,33 +400,70 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
             aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
             causalloss = - causal(aa, bb).sum() / batch_size
             antiloss = - anticausal(bb, aa).sum() / batch_size
+            countestimator.update(aa, bb)
+            priorestimator.update(aa, bb)
 
         causalloss.backward()
         antiloss.backward()
+
         causaloptimizer.step()
         antioptimizer.step()
 
-        if t % log_interval == 0:
+        if t % log_interval == 0: # EVALUATION
             steps.append(t)
 
             with torch.no_grad():
-                kl_causal.append(transfer.kullback_leibler(causal))
-                scoredist_causal.append(transfer.scoredist(causal))
 
-                kl_anti.append(antitransfer.kullback_leibler(anticausal))
-                scoredist_anti.append(antitransfer.scoredist(anticausal))
+                # SGD
+                ans['kl_causal'].append(
+                    transfer.kullback_leibler(causal))
+                ans['scoredist_causal'].append(
+                    transfer.scoredist(causal))
 
-    return {
-        'steps': np.array(steps),
-        'kl_causal': torch.stack(kl_causal).numpy(),
-        'scoredist_causal': torch.stack(scoredist_causal).numpy(),
-        'kl_anti': torch.stack(kl_anti).numpy(),
-        'scoredist_anti': torch.stack(scoredist_anti).numpy()
-    }
+                ans['kl_anti'].append(
+                    antitransfer.kullback_leibler(anticausal))
+                ans['scoredist_anti'].append(
+                    antitransfer.scoredist(anticausal))
+
+                # ASGD
+                tmp = {}
+                for model, optimizer in zip(
+                        [causal, anticausal],
+                        [causaloptimizer, antioptimizer]
+                ):
+                    for p in model.parameters():
+                        tmp[p] = p.data
+                        p.data = optimizer.state[p]['ax']
+
+                ans['kl_causal_average'].append(
+                    transfer.kullback_leibler(causal))
+                ans['scoredist_causal_average'].append(
+                    transfer.scoredist(causal))
+
+                ans['kl_anti_average'].append(
+                    antitransfer.kullback_leibler(anticausal))
+                ans['scoredist_anti_average'].append(
+                    antitransfer.scoredist(anticausal))
+
+                for model in [causal, anticausal]:
+                    for p in model.parameters():
+                        p.data = tmp[p].clone()
+
+                # MAP
+                ans['kl_MAP_uniform'].append(
+                    transfer.kullback_leibler(countestimator))
+                ans['kl_MAP_source'].append(
+                    transfer.kullback_leibler(priorestimator))
+
+    for key, item in ans.items():
+        ans[key] = torch.stack(item).numpy()
+
+    return {'steps': np.array(steps), **ans}
 
 
 def test_experiment_optimize():
-    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1, intervention='cause')
+    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1,
+                        intervention='cause')
 
 
 if __name__ == "__main__":
