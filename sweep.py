@@ -101,7 +101,7 @@ def curve_plot(bestof, figsize, confidence=(5, 95)):
         )
 
     ax.set_ylabel('$KL(p^*, p_t)$')
-    ax.set_xlabel('step t')
+    ax.set_xlabel('number of examples t')
     ax.legend()
     return fig
 
@@ -152,15 +152,16 @@ def all_plot():
 
         bestof = get_best(results, nsteps)
 
-        figpath = os.path.join('plots/MAIS', file[:-3] + 'pdf')
         figsize = (6, 3)
         curves = curve_plot(bestof, figsize)
-        curves.savefig(
-            figpath.replace('parameter_sweep', 'curve'),
-            bbox_inches='tight')
         scatter = scatter_plot(bestof, nsteps, figsize)
-        scatter.savefig(figpath.replace('parameter_sweep', 'scatter'),
-                        bbox_inches='tight')
+        for figpath in [os.path.join('plots/MAIS', file[:-3] + 'pdf'),
+                        os.path.join('plots/MAIS_png', file[:-3] + 'png')]:
+            curves.savefig(
+                figpath.replace('parameter_sweep', 'curve'),
+                bbox_inches='tight')
+            scatter.savefig(figpath.replace('parameter_sweep', 'scatter'),
+                            bbox_inches='tight')
 
 
 if __name__ == '__main__':
