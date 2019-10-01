@@ -1,9 +1,8 @@
-import copy
 import numpy as np
-import tqdm
 import torch
-from torch import nn, optim
 import torch.nn.functional as F
+import tqdm
+from torch import nn, optim
 
 
 def kullback_leibler(p1, p2):
@@ -126,6 +125,14 @@ class CategoricalStatic:
         p1 = other.to_joint().reshape(self.n, self.k ** 2)
         return kullback_leibler(p0, p1)
 
+    def newmarginal(self, concentration, fromjoint):
+        if fromjoint:
+            return sample_joint(self.k, self.n, concentration,
+                                symmetric=True).marginal
+        else:
+            return np.random.dirichlet(
+                concentration * np.ones(self.k), size=self.n)
+
     def intervention(self, on, concentration, fromjoint=True):
         # sample new marginal
         if on == 'independent':
@@ -133,12 +140,7 @@ class CategoricalStatic:
             # but without changing the effect marginal.
             newmarginal = self.reverse().marginal
         else:
-            if fromjoint:
-                newmarginal = sample_joint(self.k, self.n, concentration,
-                                           symmetric=True).marginal
-            else:
-                newmarginal = np.random.dirichlet(
-                    concentration * np.ones(self.k), size=self.n)
+            newmarginal = self.newmarginal(concentration, fromjoint)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
@@ -371,11 +373,11 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     steps = [0]
     ans = {}
     with torch.no_grad():
-        ans['kl_causal']= [transfer.kullback_leibler(causal)]
+        ans['kl_causal'] = [transfer.kullback_leibler(causal)]
         ans['scoredist_causal'] = [transfer.scoredist(causal)]
 
-        ans['kl_anti']= [antitransfer.kullback_leibler(anticausal)]
-        ans['scoredist_anti']= [antitransfer.scoredist(anticausal)]
+        ans['kl_anti'] = [antitransfer.kullback_leibler(anticausal)]
+        ans['scoredist_anti'] = [antitransfer.scoredist(anticausal)]
 
         ans['kl_causal_average'] = [transfer.kullback_leibler(causal)]
         ans['scoredist_causal_average'] = [transfer.scoredist(causal)]
@@ -409,7 +411,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
         causaloptimizer.step()
         antioptimizer.step()
 
-        if t % log_interval == 0: # EVALUATION
+        if t % log_interval == 0:  # EVALUATION
             steps.append(t)
 
             with torch.no_grad():
