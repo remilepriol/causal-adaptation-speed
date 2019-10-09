@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 
-import categorical_distance
+from categorical import distances1
 
 
 def all_distances():
@@ -17,7 +17,7 @@ def all_distances():
                 for concentration in [0.1, 1, 10]:
                     distances = []
                     for k in kk:
-                        distances.append(categorical_distance.experiment(
+                        distances.append(distances1.experiment(
                             k, n, 1, intervention, symmetric_init,
                             symmetric_intervention))
 
@@ -48,7 +48,7 @@ def optimize_distances(k=10):
     }
     # for lr in [0.01, 0.05, 0.1]:
     for lr in [0.01, 0.1, .5]:
-        trajectory = categorical_distance.experiment_optimize(
+        trajectory = distances1.experiment_optimize(
             lr=lr, **base_experiment)
         experiment = {**base_experiment, 'lr': lr, **trajectory}
         results.append(experiment)
@@ -79,7 +79,7 @@ def parameter_sweep(intervention, k=10, seed=17):
         for lr, n0 in zip(np.logspace(-3, 1, 10),
                           np.logspace(0, 3, 10)):
             np.random.seed(seed)
-            trajectory = categorical_distance.experiment_optimize(
+            trajectory = distances1.experiment_optimize(
                 lr=lr, n0=n0, **base_experiment)
             experiment = {'lr': lr, 'n0': n0,
                           'scheduler_exponent': exponent,

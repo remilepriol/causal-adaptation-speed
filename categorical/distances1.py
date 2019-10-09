@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import tqdm
 from torch import nn, optim
 
-from utils import proba2logit, logsumexp, logit2proba, kullback_leibler
+from categorical.utils import proba2logit, logsumexp, logit2proba, kullback_leibler
 
 
 def joint2conditional(joint):
