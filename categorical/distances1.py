@@ -1,10 +1,12 @@
+from collections import defaultdict
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 import tqdm
 from torch import nn, optim
 
-from categorical.utils import proba2logit, logsumexp, logit2proba, kullback_leibler
+from categorical.utils import kullback_leibler, logit2proba, logsumexp, proba2logit
 
 
 def joint2conditional(joint):
@@ -276,6 +278,33 @@ def test_CategoricalModule(n=7, k=5):
     imodules.scoredist(modules)
 
 
+class JointModule(nn.Module):
+
+    def __init__(self, logits):
+        super(JointModule, self).__init__()
+        self.n, k2 = logits.shape  # logits is flat
+
+        self.k = int(np.sqrt(k2))
+        if self.k ** 2 != k2:
+            raise ValueError('logits matrix can not be reshaped to square.')
+
+        self.logits = nn.Parameter(logits)
+
+    def forward(self, a, b):
+        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1]).view(-1)
+        index = (a * self.k + b).view(-1)
+        return F.log_softmax(self.logits, dim=1)[rows, index]
+
+    def kullback_leibler(self, other):
+        return torch.sum((self.logits - other.logits) * F.softmax(self.logits, dim=1), dim=1)
+
+    def scoredist(self, other):
+        return torch.sum((self.logits - other.logits) ** 2, dim=1)
+
+    def __repr__(self):
+        return f"CategoricalJoint(logits={self.logits.detach()})"
+
+
 class MaximumLikelihoodEstimator:
 
     def __init__(self, n, k):
@@ -331,103 +360,86 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     )
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
+
     anticausal = causalstatic.reverse().to_module()
     antitransfer = transferstatic.reverse().to_module()
+
+    joint = JointModule(causal.to_joint().detach().view(n, -1))
+    jointtransfer = JointModule(transfer.to_joint().detach().view(n, -1))
 
     optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0,
                  'weight_decay': 0}
     causaloptimizer = optim.ASGD(causal.parameters(), **optkwargs)
     antioptimizer = optim.ASGD(anticausal.parameters(), **optkwargs)
+    jointoptimizer = optim.ASGD(joint.parameters(), **optkwargs)
+    optimizers = [causaloptimizer, antioptimizer, jointoptimizer]
 
+    # MAP
     countestimator = MaximumLikelihoodEstimator(n, k)
     priorestimator = init_mle(n0, causalstatic)
 
-    steps = [0]
-    ans = {}
-    with torch.no_grad():
-        ans['kl_causal'] = [transfer.kullback_leibler(causal)]
-        ans['scoredist_causal'] = [transfer.scoredist(causal)]
+    steps = []
+    ans = defaultdict(list)
+    for t in tqdm.tqdm(range(T)):
 
-        ans['kl_anti'] = [antitransfer.kullback_leibler(anticausal)]
-        ans['scoredist_anti'] = [antitransfer.scoredist(anticausal)]
-
-        ans['kl_causal_average'] = [transfer.kullback_leibler(causal)]
-        ans['scoredist_causal_average'] = [transfer.scoredist(causal)]
-
-        ans['kl_anti_average'] = [antitransfer.kullback_leibler(anticausal)]
-        ans['scoredist_anti_average'] = [antitransfer.scoredist(anticausal)]
-
-        ans['kl_MAP_uniform'] = [transfer.kullback_leibler(countestimator)]
-        ans['kl_MAP_source'] = [transfer.kullback_leibler(priorestimator)]
-
-    for t in tqdm.tqdm(range(1, T + 1)):
-
-        causaloptimizer.lr = lr / t ** scheduler_exponent
-        antioptimizer.lr = lr / t ** scheduler_exponent
-        causaloptimizer.zero_grad()
-        antioptimizer.zero_grad()
-
-        if batch_size == 'full':
-            causalloss = transfer.kullback_leibler(causal).sum()
-            antiloss = antitransfer.kullback_leibler(anticausal).sum()
-        else:
-            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
-            causalloss = - causal(aa, bb).sum() / batch_size
-            antiloss = - anticausal(bb, aa).sum() / batch_size
-            countestimator.update(aa, bb)
-            priorestimator.update(aa, bb)
-
-        causalloss.backward()
-        antiloss.backward()
-
-        causaloptimizer.step()
-        antioptimizer.step()
-
-        if t % log_interval == 0:  # EVALUATION
+        # EVALUATION
+        if t % log_interval == 0:
             steps.append(t)
 
             with torch.no_grad():
 
-                # SGD
-                ans['kl_causal'].append(
-                    transfer.kullback_leibler(causal))
-                ans['scoredist_causal'].append(
-                    transfer.scoredist(causal))
-
-                ans['kl_anti'].append(
-                    antitransfer.kullback_leibler(anticausal))
-                ans['scoredist_anti'].append(
-                    antitransfer.scoredist(anticausal))
-
-                # ASGD
                 tmp = {}
-                for model, optimizer in zip(
-                        [causal, anticausal],
-                        [causaloptimizer, antioptimizer]
+                for model, optimizer, target, name in zip(
+                        [causal, anticausal, joint],
+                        optimizers,
+                        [transfer, antitransfer, jointtransfer],
+                        ['causal', 'anti', 'joint']
                 ):
-                    for p in model.parameters():
-                        tmp[p] = p.data
-                        p.data = optimizer.state[p]['ax']
+                    # SGD
+                    ans[f'kl_{name}'].append(target.kullback_leibler(model))
+                    ans[f'scoredist_{name}'].append(target.scoredist(model))
 
-                ans['kl_causal_average'].append(
-                    transfer.kullback_leibler(causal))
-                ans['scoredist_causal_average'].append(
-                    transfer.scoredist(causal))
+                    # ASGD
+                    if t > 0:
+                        for p in model.parameters():
+                            tmp[p] = p.data
+                            p.data = optimizer.state[p]['ax']
 
-                ans['kl_anti_average'].append(
-                    antitransfer.kullback_leibler(anticausal))
-                ans['scoredist_anti_average'].append(
-                    antitransfer.scoredist(anticausal))
+                    ans[f'kl_{name}_average'].append(
+                        target.kullback_leibler(model))
+                    ans[f'scoredist_{name}_average'].append(
+                        target.scoredist(model))
 
-                for model in [causal, anticausal]:
-                    for p in model.parameters():
-                        p.data = tmp[p].clone()
+                    if t > 0:
+                        for p in model.parameters():
+                            p.data = tmp[p].clone()
 
                 # MAP
                 ans['kl_MAP_uniform'].append(
                     transfer.kullback_leibler(countestimator))
                 ans['kl_MAP_source'].append(
                     transfer.kullback_leibler(priorestimator))
+
+        # UPDATE
+        for opt in optimizers:
+            opt.lr = lr / t ** scheduler_exponent
+            opt.zero_grad()
+
+        if batch_size == 'full':
+            causalloss = transfer.kullback_leibler(causal).sum()
+            antiloss = antitransfer.kullback_leibler(anticausal).sum()
+            jointloss = jointtransfer.kullback_leibler(joint).sum()
+        else:
+            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
+            causalloss = - causal(aa, bb).sum() / batch_size
+            antiloss = - anticausal(bb, aa).sum() / batch_size
+            jointloss = - joint(aa, bb).sum() / batch_size
+            countestimator.update(aa, bb)
+            priorestimator.update(aa, bb)
+
+        for loss, opt in zip([causalloss, antiloss, jointloss], optimizers):
+            loss.backward()
+            opt.step()
 
     for key, item in ans.items():
         ans[key] = torch.stack(item).numpy()
@@ -436,7 +448,10 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
 
 
 def test_experiment_optimize():
-    experiment_optimize(k=7, n=13, T=100, lr=.1, concentration=1,
+    experiment_optimize(k=2, n=3, T=6, lr=.1,
+                        batch_size=4,
+                        log_interval=1,
+                        concentration=1,
                         intervention='cause')
 
 
