@@ -74,8 +74,10 @@ def bigplotname(exp):
 COLORS = {
     'causal': 'blue',
     'anti': 'red',
+    'joint': 'yellow',
     'causal_average': 'darkblue',
     'anti_average': 'darkred',
+    'joint_average': 'gold',
     'MAP_uniform': 'palegreen',
     'MAP_source': 'darkgreen'
 }
