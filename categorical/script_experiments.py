@@ -75,9 +75,8 @@ def parameter_sweep(intervention, k=10, seed=17):
         'is_intervention_symmetric': False,
         'concentration': 1, 'intervention': intervention
     }
-    for exponent in [0, .5]:
-        for lr, n0 in zip(np.logspace(-3, 1, 10),
-                          np.logspace(0, 3, 10)):
+    for exponent in [0]:
+        for lr, n0 in zip([2], [k**2]):
             np.random.seed(seed)
             trajectory = distances1.experiment_optimize(
                 lr=lr, n0=n0, **base_experiment)
