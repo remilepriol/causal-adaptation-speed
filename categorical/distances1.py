@@ -113,15 +113,19 @@ class CategoricalStatic:
             # make cause and effect independent,
             # but without changing the effect marginal.
             newmarginal = self.reverse().marginal
+        elif on == 'geometric':
+            newmarginal = self.sba.mean(axis=1)
         else:
             newmarginal = self.newmarginal(concentration, fromjoint)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
             return CategoricalStatic(newmarginal, self.conditional)
-        else:  # intervention on effect
+        elif on in ['effect', 'independent', 'geometric']:  # intervention on effect
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
+        else:
+            raise ValueError(f'Intervention on {on} is not supported.')
 
     def sample(self, m, return_tensor=False):
         """For each of the n distributions, return m samples. (n*m*2 array) """
@@ -203,7 +207,7 @@ def experiment(k, n, concentration, intervention,
 
 def test_experiment():
     print('test experiment')
-    for intervention in ['cause', 'effect', 'independent']:
+    for intervention in ['cause', 'effect', 'independent', 'geometric']:
         for symmetric_init in [True, False]:
             for symmetric_intervention in [True, False]:
                 experiment(2, 3, 1, intervention, symmetric_init,
