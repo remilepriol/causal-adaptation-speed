@@ -7,6 +7,7 @@ import tqdm
 from torch import nn, optim
 
 from categorical.utils import kullback_leibler, logit2proba, logsumexp, proba2logit
+from averaging_manager import AveragedModel
 
 
 def joint2conditional(joint):
@@ -392,7 +393,6 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
 
             with torch.no_grad():
 
-                tmp = {}
                 for model, optimizer, target, name in zip(
                         [causal, anticausal, joint],
                         optimizers,
@@ -404,19 +404,11 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
                     ans[f'scoredist_{name}'].append(target.scoredist(model))
 
                     # ASGD
-                    if t > 0:
-                        for p in model.parameters():
-                            tmp[p] = p.data
-                            p.data = optimizer.state[p]['ax']
-
-                    ans[f'kl_{name}_average'].append(
-                        target.kullback_leibler(model))
-                    ans[f'scoredist_{name}_average'].append(
-                        target.scoredist(model))
-
-                    if t > 0:
-                        for p in model.parameters():
-                            p.data = tmp[p].clone()
+                    with AveragedModel(model, optimizer) as m:
+                        ans[f'kl_{name}_average'].append(
+                            target.kullback_leibler(m))
+                        ans[f'scoredist_{name}_average'].append(
+                            target.scoredist(m))
 
                 # MAP
                 ans['kl_MAP_uniform'].append(
