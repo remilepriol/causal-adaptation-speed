@@ -6,8 +6,8 @@ import torch.nn.functional as F
 import tqdm
 from torch import nn, optim
 
-from categorical.utils import kullback_leibler, logit2proba, logsumexp, proba2logit
 from averaging_manager import AveragedModel
+from categorical.utils import kullback_leibler, logit2proba, logsumexp, proba2logit
 
 
 def joint2conditional(joint):
@@ -291,9 +291,15 @@ class JointModule(nn.Module):
 
         self.k = int(np.sqrt(k2))
         if self.k ** 2 != k2:
-            raise ValueError('logits matrix can not be reshaped to square.')
+            raise ValueError('Logits matrix can not be reshaped to square.')
 
         self.logits = nn.Parameter(logits)
+
+    @property
+    def logpartition(self):
+        eachmax = torch.max(self.logits, dim=-1)
+        return eachmax + torch.log(
+            torch.sum(torch.exp(self.logits - eachmax[:, None]), dim=-1))
 
     def forward(self, a, b):
         rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1]).view(-1)
