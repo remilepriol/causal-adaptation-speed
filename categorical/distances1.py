@@ -297,9 +297,7 @@ class JointModule(nn.Module):
 
     @property
     def logpartition(self):
-        eachmax = torch.max(self.logits, dim=-1)
-        return eachmax + torch.log(
-            torch.sum(torch.exp(self.logits - eachmax[:, None]), dim=-1))
+        return torch.logsumexp(self.logits, dim=1)
 
     def forward(self, a, b):
         rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1]).view(-1)
@@ -307,7 +305,9 @@ class JointModule(nn.Module):
         return F.log_softmax(self.logits, dim=1)[rows, index]
 
     def kullback_leibler(self, other):
-        return torch.sum((self.logits - other.logits) * F.softmax(self.logits, dim=1), dim=1)
+        a = self.logpartition
+        kl = torch.sum((self.logits - other.logits) * torch.exp(self.logits - a[:, None]), dim=1)
+        return kl - a + other.logpartition
 
     def scoredist(self, other):
         return torch.sum((self.logits - other.logits) ** 2, dim=1)
