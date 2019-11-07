@@ -341,7 +341,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
                         is_init_symmetric=True,
                         is_intervention_symmetric=False,
                         batch_size=10, scheduler_exponent=0, n0=10,
-                        log_interval=10):
+                        log_interval=10, use_map=False):
     """Measure optimization speed and parameters distance.
 
     Hypothesis: initial distance to optimum is correlated to optimization speed with SGD.
@@ -411,10 +411,11 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
                             target.scoredist(m))
 
                 # MAP
-                ans['kl_MAP_uniform'].append(
-                    transfer.kullback_leibler(countestimator))
-                ans['kl_MAP_source'].append(
-                    transfer.kullback_leibler(priorestimator))
+                if use_map:
+                    ans['kl_MAP_uniform'].append(
+                        transfer.kullback_leibler(countestimator))
+                    ans['kl_MAP_source'].append(
+                        transfer.kullback_leibler(priorestimator))
 
         # UPDATE
         for opt in optimizers:
@@ -430,8 +431,9 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
             causalloss = - causal(aa, bb).sum() / batch_size
             antiloss = - anticausal(bb, aa).sum() / batch_size
             jointloss = - joint(aa, bb).sum() / batch_size
-            countestimator.update(aa, bb)
-            priorestimator.update(aa, bb)
+            if use_map:
+                countestimator.update(aa, bb)
+                priorestimator.update(aa, bb)
 
         for loss, opt in zip([causalloss, antiloss, jointloss], optimizers):
             loss.backward()
