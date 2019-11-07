@@ -66,24 +66,22 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k=10, seed=17):
+def parameter_sweep(intervention, k, seed=17):
     results = []
     base_experiment = {
-        'n': 100, 'k': k, 'T': 1500,
+        'n': 100, 'k': k, 'T': 500,
         'batch_size': 1,
+        'intervention': intervention,
         'is_init_symmetric': False,
         'is_intervention_symmetric': False,
-        'concentration': 1, 'intervention': intervention
+        'concentration': 1, 'use_map': False
     }
     for exponent in [0]:
-        for lr, n0 in zip([2], [k**2]):
+        for lr in [1, 2, 3, 4]:
             np.random.seed(seed)
-            trajectory = distances1.experiment_optimize(
-                lr=lr, n0=n0, **base_experiment)
-            experiment = {'lr': lr, 'n0': n0,
-                          'scheduler_exponent': exponent,
-                          **base_experiment, **trajectory}
-            results.append(experiment)
+            parameters = {'lr': lr, 'n0': 1, 'scheduler_exponent': exponent, **base_experiment}
+            trajectory = distances1.experiment_optimize(**parameters)
+            results.append({**parameters, **trajectory})
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
@@ -105,5 +103,5 @@ def parameter_sweep(intervention, k=10, seed=17):
 
 if __name__ == "__main__":
     # optimize_distances()
-    parameter_sweep('cause')
-    parameter_sweep('effect')
+    parameter_sweep('cause', k=100)
+    parameter_sweep('effect', k=100)
