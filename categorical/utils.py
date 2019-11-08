@@ -5,6 +5,10 @@ def kullback_leibler(p1, p2):
     return np.sum(p1 * np.log(p1 / p2), axis=-1)
 
 
+def entropy(p):
+    return -np.sum(p * np.log(p), axis=-1)
+
+
 def logsumexp(s):
     smax = np.amax(s, axis=-1)
     return smax + np.log(
