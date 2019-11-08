@@ -1,5 +1,6 @@
 import os
 import pickle
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -86,7 +87,7 @@ def curve_plot(bestof, figsize, skiplist, confidence=(5, 95)):
         )
 
     ax.grid(True)
-    ax.set_yscale('log')
+    # ax.set_yscale('log')
     ax.set_ylabel('$KL(p^*, p_t)$')
     ax.set_xlabel('number of examples t')
     ax.legend()
@@ -121,6 +122,7 @@ def scatter_plot(bestof, nsteps, figsize, skiplist):
     ax.set_xlabel(r'$|| \mathbf{s_0 - s^*} ||^2$')
     return fig
 
+
 def two_plots(results, nsteps, plotname):
     print()
     print(plotname)
@@ -130,13 +132,12 @@ def two_plots(results, nsteps, plotname):
     curves = curve_plot(bestof, figsize, skiplist)
     scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
     os.makedirs('plots/sweep/png', exist_ok=True)
-    for figpath in [os.path.join('plots/sweep', plotname + '.pdf'),
-                    os.path.join('plots/sweep/png', plotname + '.png')]:
-        curves.savefig(
-            figpath.replace('parameter_sweep', 'curve'),
-            bbox_inches='tight')
-        scatter.savefig(figpath.replace('parameter_sweep', 'scatter'),
-                        bbox_inches='tight')
+    for style, fig in {'curves': curves, 'scatter': scatter}.items():
+        for figpath in [os.path.join('plots/sweep', f'{style}_{plotname}.pdf')]:
+            # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
+            fig.savefig(figpath, bbox_inches='tight')
+    plt.close(curves)
+    plt.close(scatter)
     print()
 
 
@@ -144,25 +145,26 @@ def all_plot():
     results_dir = 'results'
     basefile = 'asyminter_asyminit_parameter_sweep_'
     for k in [10, 50, 100]:
-        rr = []
-        for intervention in ['cause', 'effect']:
-            file = basefile + f'{intervention}_k={k}.pkl'
+        rr = defaultdict(list)
+        for intervention in ['independent', 'cause', 'effect', 'geometric', 'weightedgeo']:
+            plotname = f'{intervention}_k={k}'
+            file = basefile + plotname + '.pkl'
             with open(os.path.join(results_dir, file), 'rb') as fin:
                 results = pickle.load(fin)
-                #two_plots(results, nsteps=400, plotname=file[:-4])
-                rr += [results]
+                two_plots(results, nsteps=400, plotname=plotname)
+                rr[intervention] = results
 
         # now let's combine results from intervention on cause and effect
         rrr = []
-        for e1, e2 in zip(rr[0], rr[1]):
+        for e1, e2 in zip(rr['cause'], rr['effect']):
             assert e1['lr'] == e2['lr']
             combined = e1.copy()
             for key in e2.keys():
                 if key.startswith(('scoredist', 'kl')):
                     combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
             rrr += [combined]
-
-        two_plots(rrr, nsteps=400, plotname=basefile + f'combined_k={k}')
+        if len(rrr) > 0:
+            two_plots(rrr, nsteps=400, plotname=f'combined_k={k}')
 
 
 if __name__ == '__main__':
