@@ -26,7 +26,7 @@ def jointlogit2conditional(joint):
     return CategoricalStatic(sa, sba, from_probas=False)
 
 
-def sample_joint(k, n, concentration, symmetric=True):
+def sample_joint(k, n, concentration=1, symmetric=True):
     """Sample n causal mechanisms of categorical variables of dimension K."""
     if symmetric:
         joint = np.random.dirichlet(concentration * np.ones(k ** 2),
@@ -108,21 +108,24 @@ class CategoricalStatic:
             return np.random.dirichlet(
                 concentration * np.ones(self.k), size=self.n)
 
-    def intervention(self, on, concentration, fromjoint=True):
+    def intervention(self, on, concentration=1, fromjoint=True):
         # sample new marginal
         if on == 'independent':
             # make cause and effect independent,
             # but without changing the effect marginal.
             newmarginal = self.reverse().marginal
         elif on == 'geometric':
-            newmarginal = self.sba.mean(axis=1)
+            newmarginal = logit2proba(self.sba.mean(axis=1))
+        elif on == 'weightedgeo':
+            newmarginal = logit2proba(np.sum(self.sba * self.marginal[:, :, None], axis=1))
         else:
             newmarginal = self.newmarginal(concentration, fromjoint)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
             return CategoricalStatic(newmarginal, self.conditional)
-        elif on in ['effect', 'independent', 'geometric']:  # intervention on effect
+        elif on in ['effect', 'independent', 'geometric', 'weightedgeo']:
+            # intervention on effect
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
         else:
@@ -208,7 +211,7 @@ def experiment(k, n, concentration, intervention,
 
 def test_experiment():
     print('test experiment')
-    for intervention in ['cause', 'effect', 'independent', 'geometric']:
+    for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
         for symmetric_init in [True, False]:
             for symmetric_intervention in [True, False]:
                 experiment(2, 3, 1, intervention, symmetric_init,
@@ -293,6 +296,8 @@ class JointModule(nn.Module):
         if self.k ** 2 != k2:
             raise ValueError('Logits matrix can not be reshaped to square.')
 
+        # normalize to sum to 0
+        logits = logits - logits.mean(dim=1, keepdim=True)
         self.logits = nn.Parameter(logits)
 
     @property
