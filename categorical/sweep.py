@@ -121,41 +121,48 @@ def scatter_plot(bestof, nsteps, figsize, skiplist):
     ax.set_xlabel(r'$|| \mathbf{s_0 - s^*} ||^2$')
     return fig
 
+def two_plots(results, nsteps, plotname):
+    print()
+    print(plotname)
+    bestof = get_best(results, nsteps)
+    figsize = (6, 3)
+    skiplist = ['causal', 'anti', 'joint']  # , 'MAP_uniform', 'MAP_source']
+    curves = curve_plot(bestof, figsize, skiplist)
+    scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
+    os.makedirs('plots/sweep/png', exist_ok=True)
+    for figpath in [os.path.join('plots/sweep', plotname + '.pdf'),
+                    os.path.join('plots/sweep/png', plotname + '.png')]:
+        curves.savefig(
+            figpath.replace('parameter_sweep', 'curve'),
+            bbox_inches='tight')
+        scatter.savefig(figpath.replace('parameter_sweep', 'scatter'),
+                        bbox_inches='tight')
+    print()
+
 
 def all_plot():
-    nsteps = 400
     results_dir = 'results'
-    # for file in os.listdir(results_dir):
-    #     if f'parameter_sweep' not in file or 'k=10.pkl' not in file:
-    #         print('Skip ', file)
-    #         continue
-    for file in [
-        'asyminter_asyminit_parameter_sweep_cause_k=10.pkl',
-        'asyminter_asyminit_parameter_sweep_effect_k=10.pkl',
-        'asyminter_asyminit_parameter_sweep_cause_k=100.pkl',
-        'asyminter_asyminit_parameter_sweep_effect_k=100.pkl'
-    ]:
-        print()
-        print(file)
-        with open(os.path.join(results_dir, file), 'rb') as fin:
-            results = pickle.load(fin)
+    basefile = 'asyminter_asyminit_parameter_sweep_'
+    for k in [10, 50, 100]:
+        rr = []
+        for intervention in ['cause', 'effect']:
+            file = basefile + f'{intervention}_k={k}.pkl'
+            with open(os.path.join(results_dir, file), 'rb') as fin:
+                results = pickle.load(fin)
+                #two_plots(results, nsteps=400, plotname=file[:-4])
+                rr += [results]
 
-        bestof = get_best(results, nsteps)
+        # now let's combine results from intervention on cause and effect
+        rrr = []
+        for e1, e2 in zip(rr[0], rr[1]):
+            assert e1['lr'] == e2['lr']
+            combined = e1.copy()
+            for key in e2.keys():
+                if key.startswith(('scoredist', 'kl')):
+                    combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
+            rrr += [combined]
 
-        figsize = (6, 3)
-        skiplist = []  # ['causal', 'anti', 'MAP_uniform', 'MAP_source']
-        curves = curve_plot(bestof, figsize, skiplist)
-        scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
-        os.makedirs('plots/sweep/png', exist_ok=True)
-        for figpath in [os.path.join('plots/sweep', file[:-3] + 'pdf'),
-                        os.path.join('plots/sweep/png', file[:-3] + 'png')]:
-            curves.savefig(
-                figpath.replace('parameter_sweep', 'curve'),
-                bbox_inches='tight')
-            scatter.savefig(figpath.replace('parameter_sweep', 'scatter'),
-                            bbox_inches='tight')
-
-        print()
+        two_plots(rrr, nsteps=400, plotname=basefile + f'combined_k={k}')
 
 
 if __name__ == '__main__':
