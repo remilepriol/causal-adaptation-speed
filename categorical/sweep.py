@@ -57,7 +57,7 @@ def get_best(results, nsteps):
                           '\t kl={value:.3f}').format(**item))
 
     for model, item in by_model.items():
-        if not 'MAP' in model:
+        if 'MAP' not in model:
             print(model, ('\t alpha={scheduler_exponent},'
                           '\t lr={lr:.1e},'
                           '\t kl={value:.3f}').format(**item))
