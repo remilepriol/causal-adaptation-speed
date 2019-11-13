@@ -78,7 +78,7 @@ def parameter_sweep(intervention, k, seed=17):
     }
     for exponent in [0]:
         # for lr in [1, 2, 3, 4]:
-        for lr in [.3, 1, 3, 9]:
+        for lr in [.03, .1, .3, 1, 3, 9, 30]:
             np.random.seed(seed)
             parameters = {'lr': lr, 'n0': 1, 'scheduler_exponent': exponent, **base_experiment}
             trajectory = distances1.experiment_optimize(**parameters)
@@ -103,10 +103,10 @@ def parameter_sweep(intervention, k, seed=17):
 
 
 if __name__ == "__main__":
-    # # optimize_distances()
-    # parameter_sweep('cause', k=100)
-    # parameter_sweep('effect', k=100)
+    # optimize_distances()
     for k in [10, 50, 100]:
-        # parameter_sweep('geometric', k=k)
-        # parameter_sweep('weightedgeo', k=k)
+        parameter_sweep('cause', k=k)
+        parameter_sweep('effect', k=k)
+        parameter_sweep('geometric', k=k)
+        parameter_sweep('weightedgeo', k=k)
         parameter_sweep('independent', k=k)
