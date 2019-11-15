@@ -339,9 +339,9 @@ def init_mle(n0: int, static: CategoricalStatic):
     return mle
 
 
-def experiment_optimize(k, n, T, lr, concentration, intervention,
+def experiment_optimize(k, n, T, lr, intervention,
+                        concentration=1,
                         is_init_symmetric=True,
-                        is_intervention_symmetric=False,
                         batch_size=10, scheduler_exponent=0, n0=10,
                         log_interval=10, use_map=False):
     """Measure optimization speed and parameters distance.
@@ -447,7 +447,6 @@ def test_experiment_optimize():
     experiment_optimize(k=2, n=3, T=6, lr=.1,
                         batch_size=4,
                         log_interval=1,
-                        concentration=1,
                         intervention='cause')
 
 

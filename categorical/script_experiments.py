@@ -73,7 +73,6 @@ def parameter_sweep(intervention, k, seed=17):
         'batch_size': 1,
         'intervention': intervention,
         'is_init_symmetric': False,
-        'is_intervention_symmetric': False,
         'concentration': 1, 'use_map': False
     }
     for exponent in [0]:
@@ -86,16 +85,13 @@ def parameter_sweep(intervention, k, seed=17):
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
-    savefile = f'sweep2_{intervention}_k={k}.pkl'
 
+    savefile = f'{intervention}_k={k}.pkl'
     if base_experiment['is_init_symmetric']:
         savefile = 'syminit_' + savefile
     else:
         savefile = 'asyminit_' + savefile
-    if base_experiment['is_intervention_symmetric']:
-        savefile = 'syminter_' + savefile
-    else:
-        savefile = 'asyminter_' + savefile
+    savefile = 'sweep2_' + savefile
 
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
