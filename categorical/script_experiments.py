@@ -86,7 +86,7 @@ def parameter_sweep(intervention, k, seed=17):
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
-    savefile = f'parameter_sweep_{intervention}_k={k}.pkl'
+    savefile = f'sweep2_{intervention}_k={k}.pkl'
 
     if base_experiment['is_init_symmetric']:
         savefile = 'syminit_' + savefile
@@ -104,7 +104,7 @@ def parameter_sweep(intervention, k, seed=17):
 
 if __name__ == "__main__":
     # optimize_distances()
-    for k in [10, 50, 100]:
+    for k in [5, 10, 20]:
         parameter_sweep('cause', k=k)
         parameter_sweep('effect', k=k)
         parameter_sweep('geometric', k=k)

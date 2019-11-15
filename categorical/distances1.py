@@ -27,14 +27,17 @@ def jointlogit2conditional(joint):
 
 
 def sample_joint(k, n, concentration=1, symmetric=True):
-    """Sample n causal mechanisms of categorical variables of dimension K."""
+    """Sample n causal mechanisms of categorical variables of dimension K.
+
+    The concentration argument specifies the concentration of the resulting cause marginal.
+    """
     if symmetric:
-        joint = np.random.dirichlet(concentration * np.ones(k ** 2),
+        joint = np.random.dirichlet(concentration/k * np.ones(k ** 2),
                                     size=n).reshape((n, k, k))
         return joint2conditional(joint)
     else:
         pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-        pba = np.random.dirichlet(concentration * np.ones(k), size=[n, k])
+        pba = np.random.dirichlet(concentration/k * np.ones(k), size=[n, k])
         return CategoricalStatic(pa, pba)
 
 
