@@ -32,12 +32,12 @@ def sample_joint(k, n, concentration=1, symmetric=True):
     The concentration argument specifies the concentration of the resulting cause marginal.
     """
     if symmetric:
-        joint = np.random.dirichlet(concentration/k * np.ones(k ** 2),
+        joint = np.random.dirichlet(concentration / k * np.ones(k ** 2),
                                     size=n).reshape((n, k, k))
         return joint2conditional(joint)
     else:
         pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-        pba = np.random.dirichlet(concentration/k * np.ones(k), size=[n, k])
+        pba = np.random.dirichlet(concentration / k * np.ones(k), size=[n, k])
         return CategoricalStatic(pa, pba)
 
 
@@ -103,15 +103,7 @@ class CategoricalStatic:
         p1 = other.to_joint().reshape(self.n, self.k ** 2)
         return kullback_leibler(p0, p1)
 
-    def newmarginal(self, concentration, fromjoint):
-        if fromjoint:
-            return sample_joint(self.k, self.n, concentration,
-                                symmetric=True).marginal
-        else:
-            return np.random.dirichlet(
-                concentration * np.ones(self.k), size=self.n)
-
-    def intervention(self, on, concentration=1, fromjoint=True):
+    def intervention(self, on, concentration=1):
         # sample new marginal
         if on == 'independent':
             # make cause and effect independent,
@@ -122,7 +114,7 @@ class CategoricalStatic:
         elif on == 'weightedgeo':
             newmarginal = logit2proba(np.sum(self.sba * self.marginal[:, :, None], axis=1))
         else:
-            newmarginal = self.newmarginal(concentration, fromjoint)
+            newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
 
         # replace the cause or the effect by this marginal
         if on == 'cause':
@@ -197,11 +189,7 @@ def experiment(k, n, concentration, intervention,
     """
     # causal parameters
     causal = sample_joint(k, n, concentration, symmetric_init)
-    transfer = causal.intervention(
-        on=intervention,
-        concentration=concentration,
-        fromjoint=symmetric_intervention
-    )
+    transfer = causal.intervention(on=intervention, concentration=concentration)
     cpd, csd = causal.sqdistance(transfer)
 
     # anticausal parameters
@@ -372,11 +360,7 @@ def experiment_optimize(k, n, T, lr, concentration, intervention,
     initial parameters
     """
     causalstatic = sample_joint(k, n, concentration, is_init_symmetric)
-    transferstatic = causalstatic.intervention(
-        on=intervention,
-        concentration=concentration,
-        fromjoint=is_intervention_symmetric
-    )
+    transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
 
