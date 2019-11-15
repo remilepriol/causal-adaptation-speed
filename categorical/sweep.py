@@ -131,9 +131,9 @@ def two_plots(results, nsteps, plotname):
     skiplist = ['causal', 'anti', 'joint']  # , 'MAP_uniform', 'MAP_source']
     curves = curve_plot(bestof, figsize, skiplist)
     scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
-    os.makedirs('plots/sweep/png', exist_ok=True)
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
-        for figpath in [os.path.join('plots/sweep', f'{style}_{plotname}.pdf')]:
+        for figpath in [os.path.join('plots/sweep', f'{style}/{plotname}.pdf')]:
+            os.makedirs(os.path.dirname(figpath), exist_ok=True)
             # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
             fig.savefig(figpath, bbox_inches='tight')
     plt.close(curves)
@@ -145,26 +145,38 @@ def all_plot():
     results_dir = 'results'
     basefile = 'asyminter_asyminit_parameter_sweep_'
     for k in [10, 50, 100]:
-        rr = defaultdict(list)
-        for intervention in ['independent', 'cause', 'effect', 'geometric', 'weightedgeo']:
+        allresults = defaultdict(list)
+        for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
             plotname = f'{intervention}_k={k}'
             file = basefile + plotname + '.pkl'
             with open(os.path.join(results_dir, file), 'rb') as fin:
                 results = pickle.load(fin)
                 two_plots(results, nsteps=400, plotname=plotname)
-                rr[intervention] = results
+                allresults[intervention] = results
 
         # now let's combine results from intervention on cause and effect
-        rrr = []
-        for e1, e2 in zip(rr['cause'], rr['effect']):
+        # let's also report statistics about pooled results
+        combineds = []
+        pooleds = []
+        for e1, e2 in zip(allresults['cause'], allresults['effect']):
             assert e1['lr'] == e2['lr']
             combined = e1.copy()
+            pooled = e1.copy()
             for key in e2.keys():
                 if key.startswith(('scoredist', 'kl')):
                     combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
-            rrr += [combined]
-        if len(rrr) > 0:
-            two_plots(rrr, nsteps=400, plotname=f'combined_k={k}')
+                    # pooled records the average over 10 cause and 10 effect interventions
+                    # the goal is to have tighter percentile curves
+                    # which are representative of the algorithm's performance
+                    meantraj = (e1[key] + e2[key]) / 2
+                    bs = 5
+                    pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
+                                            for i in range(meantraj.shape[1] // bs)]).T
+            combineds += [combined]
+            pooleds += [pooled]
+        if len(combineds) > 0:
+            two_plots(combineds, nsteps=400, plotname=f'combined_k={k}')
+            two_plots(pooleds, nsteps=400, plotname=f'pooled_k={k}')
 
 
 if __name__ == '__main__':
