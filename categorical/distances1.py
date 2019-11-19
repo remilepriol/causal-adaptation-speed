@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import tqdm
+from scipy import stats
 from torch import nn, optim
 
 from averaging_manager import AveragedModel
@@ -26,19 +27,34 @@ def jointlogit2conditional(joint):
     return CategoricalStatic(sa, sba, from_probas=False)
 
 
-def sample_joint(k, n, concentration=1, symmetric=True):
+def sample_joint(k, n, concentration=1, symmetric=True, logits=True):
     """Sample n causal mechanisms of categorical variables of dimension K.
 
     The concentration argument specifies the concentration of the resulting cause marginal.
     """
-    if symmetric:
-        joint = np.random.dirichlet(concentration / k * np.ones(k ** 2),
-                                    size=n).reshape((n, k, k))
-        return joint2conditional(joint)
+    if logits:
+        # use the fact that a loggamma is well approximated by a negative exponential variable
+        # for small values of the shape parameter with the transformation scale = 1/ shape
+        if symmetric:
+
+            logits = - stats.expon.rvs(scale=k / concentration, size=(n, k, k))
+            logits -= logits.mean(axis=(1, 2), keepdims=True)
+            return jointlogit2conditional(logits)
+        else:
+            sa = stats.loggamma.rvs(concentration, size=(n, k))
+            sba = - stats.expon.rvs(scale=k / concentration, size=(n, k, k))
+            sa -= sa.mean(axis=1, keepdims=True)
+            sba -= sba.mean(axis=2, keepdims=True)
+            return CategoricalStatic(sa, sba, from_probas=False)
     else:
-        pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-        pba = np.random.dirichlet(concentration / k * np.ones(k), size=[n, k])
-        return CategoricalStatic(pa, pba)
+        if symmetric:
+            joint = np.random.dirichlet(concentration / k * np.ones(k ** 2),
+                                        size=n).reshape((n, k, k))
+            return joint2conditional(joint)
+        else:
+            pa = np.random.dirichlet(concentration * np.ones(k), size=n)
+            pba = np.random.dirichlet(concentration / k * np.ones(k), size=[n, k])
+            return CategoricalStatic(pa, pba)
 
 
 class CategoricalStatic:
