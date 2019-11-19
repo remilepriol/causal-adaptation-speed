@@ -123,7 +123,7 @@ def scatter_plot(bestof, nsteps, figsize, skiplist):
     return fig
 
 
-def two_plots(results, nsteps, plotname):
+def two_plots(results, nsteps, plotname, dirname):
     print()
     print(plotname)
     bestof = get_best(results, nsteps)
@@ -132,7 +132,7 @@ def two_plots(results, nsteps, plotname):
     curves = curve_plot(bestof, figsize, skiplist)
     scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
-        for figpath in [os.path.join('plots/sweep', f'{style}/{plotname}.pdf')]:
+        for figpath in [os.path.join('plots', dirname, style, f'{plotname}.pdf')]:
             os.makedirs(os.path.dirname(figpath), exist_ok=True)
             # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
             fig.savefig(figpath, bbox_inches='tight')
@@ -143,15 +143,17 @@ def two_plots(results, nsteps, plotname):
 
 def all_plot():
     results_dir = 'results'
-    basefile = 'asyminter_asyminit_parameter_sweep_'
-    for k in [10, 50, 100]:
+    # basefile = 'asyminter_asyminit_parameter_sweep_'
+    # for k in [10, 50, 100]:
+    basefile = 'sweep2_syminit_'
+    for k in [5, 10, 20]:
         allresults = defaultdict(list)
         for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
             plotname = f'{intervention}_k={k}'
             file = basefile + plotname + '.pkl'
             with open(os.path.join(results_dir, file), 'rb') as fin:
                 results = pickle.load(fin)
-                two_plots(results, nsteps=400, plotname=plotname)
+                two_plots(results, nsteps=400, plotname=plotname, dirname=basefile[:-1])
                 allresults[intervention] = results
 
         # now let's combine results from intervention on cause and effect
@@ -175,8 +177,8 @@ def all_plot():
             combineds += [combined]
             pooleds += [pooled]
         if len(combineds) > 0:
-            two_plots(combineds, nsteps=400, plotname=f'combined_k={k}')
-            two_plots(pooleds, nsteps=400, plotname=f'pooled_k={k}')
+            two_plots(combineds, nsteps=400, plotname=f'combined_k={k}', dirname=basefile[:-1])
+            two_plots(pooleds, nsteps=400, plotname=f'pooled_k={k}', dirname=basefile[:-1])
 
 
 if __name__ == '__main__':
