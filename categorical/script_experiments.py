@@ -66,7 +66,7 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k, init, seed=17):
+def parameter_sweep(intervention, k, init=False, seed=17):
     results = []
     base_experiment = {
         'n': 100, 'k': k, 'T': 1500,
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         for k in [10, 20, 50]:
             parameter_sweep('cause', k, init)
             parameter_sweep('effect', k, init)
-            parameter_sweep('geometric', k, init)
+            # parameter_sweep('geometric', k, init)
             # parameter_sweep('weightedgeo', k, init)
-            parameter_sweep('independent', k, init)
+            # parameter_sweep('independent', k, init)
 

@@ -131,7 +131,7 @@ class CategoricalStatic:
             newmarginal = logit2proba(np.sum(self.sba * self.marginal[:, :, None], axis=1))
         else:
             newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
-
+        # TODO use logits of the marginal for stability certainty
         # replace the cause or the effect by this marginal
         if on == 'cause':
             return CategoricalStatic(newmarginal, self.conditional)

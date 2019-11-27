@@ -10,7 +10,7 @@ from categorical.script_plot import COLORS
 np.set_printoptions(precision=2)
 
 
-def integral_kl(trajectory, nsteps=1000):
+def value_at_step(trajectory, nsteps=1000):
     """Return the KL and the integral KL up to nsteps."""
     steps = trajectory['steps']
     index = np.searchsorted(steps, nsteps) - 1
@@ -35,9 +35,9 @@ def get_best(results, nsteps):
     for exp in results:
         relevant_parameters = {
             key: exp[key] for key in
-            ['lr', 'n0', 'scheduler_exponent', 'steps']}
+            ['k', 'lr', 'n0', 'scheduler_exponent', 'steps']}
 
-        for model, metric in integral_kl(exp, nsteps).items():
+        for model, metric in value_at_step(exp, nsteps).items():
             if model not in by_model:
                 by_model[model] = []
             toadd = {**relevant_parameters,
@@ -76,6 +76,12 @@ def curve_plot(bestof, figsize, skiplist, confidence=(5, 95)):
         xx = item['steps']
         values = item['kl']
 
+        # truncate plot for k-invariance
+        k = item['k']
+        end = np.searchsorted(xx, k ** 2) + 1
+        xx = xx[:end]
+        values = values[:end]
+
         # plot mean and percentile statistics
         ax.plot(xx, values.mean(axis=1), label=model, color=COLORS[model])
         ax.fill_between(
@@ -91,6 +97,7 @@ def curve_plot(bestof, figsize, skiplist, confidence=(5, 95)):
     ax.set_ylabel('$KL(p^*, p_t)$')
     ax.set_xlabel('number of examples t')
     ax.legend()
+
     return fig
 
 
@@ -116,7 +123,7 @@ def scatter_plot(bestof, nsteps, figsize, skiplist):
     ax.grid(True)
     ax.set_yscale('log')
     ax.set_xscale('log')
-    ax.set_ylabel(r'$KL(p^*, p_{T=1000})$')
+    ax.set_ylabel(f'KL(p^*, p_T={nsteps})')
     ax.legend()
     # ax.set_xlabel('||transfer - model||^2 at initialization')
     ax.set_xlabel(r'$|| \mathbf{s_0 - s^*} ||^2$')
@@ -129,7 +136,11 @@ def two_plots(results, nsteps, plotname, dirname):
     bestof = get_best(results, nsteps)
     figsize = (6, 3)
     skiplist = ['causal', 'anti', 'joint']  # , 'MAP_uniform', 'MAP_source']
-    curves = curve_plot(bestof, figsize, skiplist)
+    confidence = (5, 95)
+    curves = curve_plot(bestof, figsize, skiplist, confidence)
+    initstring = 'syminit' if results[0]["is_init_symmetric"] else 'asyminit'
+    curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
+                    f'{initstring},  k={results[0]["k"]}')
     scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
         for figpath in [os.path.join('plots', dirname, style, f'{plotname}.pdf')]:
@@ -143,42 +154,49 @@ def two_plots(results, nsteps, plotname, dirname):
 
 def all_plot():
     results_dir = 'results'
+
     # basefile = 'asyminter_asyminit_parameter_sweep_'
     # for k in [10, 50, 100]:
-    basefile = 'sweep2_syminit_'
-    for k in [5, 10, 20]:
-        allresults = defaultdict(list)
-        for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
-            plotname = f'{intervention}_k={k}'
-            file = basefile + plotname + '.pkl'
-            with open(os.path.join(results_dir, file), 'rb') as fin:
-                results = pickle.load(fin)
-                two_plots(results, nsteps=400, plotname=plotname, dirname=basefile[:-1])
-                allresults[intervention] = results
 
-        # now let's combine results from intervention on cause and effect
-        # let's also report statistics about pooled results
-        combineds = []
-        pooleds = []
-        for e1, e2 in zip(allresults['cause'], allresults['effect']):
-            assert e1['lr'] == e2['lr']
-            combined = e1.copy()
-            pooled = e1.copy()
-            for key in e2.keys():
-                if key.startswith(('scoredist', 'kl')):
-                    combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
-                    # pooled records the average over 10 cause and 10 effect interventions
-                    # the goal is to have tighter percentile curves
-                    # which are representative of the algorithm's performance
-                    meantraj = (e1[key] + e2[key]) / 2
-                    bs = 5
-                    pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
-                                            for i in range(meantraj.shape[1] // bs)]).T
-            combineds += [combined]
-            pooleds += [pooled]
-        if len(combineds) > 0:
-            two_plots(combineds, nsteps=400, plotname=f'combined_k={k}', dirname=basefile[:-1])
-            two_plots(pooleds, nsteps=400, plotname=f'pooled_k={k}', dirname=basefile[:-1])
+    for init in ['syminit_', 'asyminit_']:
+        basefile = 'sweep2_' + init
+        for k in [10, 20, 50]:
+            nsteps = k ** 2 // 4
+            allresults = defaultdict(list)
+            for intervention in ['cause', 'effect', 'independent', 'geometric']:
+                # , 'weightedgeo']:
+                plotname = f'{intervention}_k={k}'
+                file = basefile + plotname + '.pkl'
+                with open(os.path.join(results_dir, file), 'rb') as fin:
+                    results = pickle.load(fin)
+                    # Optimize hyperparameters for nsteps such that curves are k-invariant
+                    two_plots(results, nsteps, plotname=plotname,
+                              dirname=basefile[:-1])
+                    allresults[intervention] = results
+
+            # now let's combine results from intervention on cause and effect
+            # let's also report statistics about pooled results
+            combineds = []
+            pooleds = []
+            for e1, e2 in zip(allresults['cause'], allresults['effect']):
+                assert e1['lr'] == e2['lr']
+                combined = e1.copy()
+                pooled = e1.copy()
+                for key in e2.keys():
+                    if key.startswith(('scoredist', 'kl')):
+                        combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
+                        # pooled records the average over 10 cause and 10 effect interventions
+                        # the goal is to have tighter percentile curves
+                        # which are representative of the algorithm's performance
+                        meantraj = (e1[key] + e2[key]) / 2
+                        bs = 5
+                        pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
+                                                for i in range(meantraj.shape[1] // bs)]).T
+                combineds += [combined]
+                pooleds += [pooled]
+            if len(combineds) > 0:
+                two_plots(combineds, nsteps, plotname=f'combined_k={k}', dirname=basefile[:-1])
+                two_plots(pooleds, nsteps, plotname=f'pooled_k={k}', dirname=basefile[:-1])
 
 
 if __name__ == '__main__':
