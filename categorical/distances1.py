@@ -27,34 +27,27 @@ def jointlogit2conditional(joint):
     return CategoricalStatic(sa, sba, from_probas=False)
 
 
-def sample_joint(k, n, concentration=1, symmetric=True, logits=True):
+def sample_joint(k, n, concentration=1, dense=False, logits=True):
     """Sample n causal mechanisms of categorical variables of dimension K.
 
     The concentration argument specifies the concentration of the resulting cause marginal.
     """
     if logits:
-        # use the fact that a loggamma is well approximated by a negative exponential variable
-        # for small values of the shape parameter with the transformation scale = 1/ shape
-        if symmetric:
-
-            logits = - stats.expon.rvs(scale=k / concentration, size=(n, k, k))
-            logits -= logits.mean(axis=(1, 2), keepdims=True)
-            return jointlogit2conditional(logits)
+        sa = stats.loggamma.rvs(concentration, size=(n, k))
+        if dense:
+            sba = - stats.loggamma.rvs(concentration, size=(n, k, k))
         else:
-            sa = stats.loggamma.rvs(concentration, size=(n, k))
+            # use the fact that a loggamma is well approximated by a negative exponential
+            # for small values of the shape parameter with the transformation scale = 1/ shape
             sba = - stats.expon.rvs(scale=k / concentration, size=(n, k, k))
-            sa -= sa.mean(axis=1, keepdims=True)
-            sba -= sba.mean(axis=2, keepdims=True)
-            return CategoricalStatic(sa, sba, from_probas=False)
+        sa -= sa.mean(axis=1, keepdims=True)
+        sba -= sba.mean(axis=2, keepdims=True)
+        return CategoricalStatic(sa, sba, from_probas=False)
     else:
-        if symmetric:
-            joint = np.random.dirichlet(concentration / k * np.ones(k ** 2),
-                                        size=n).reshape((n, k, k))
-            return joint2conditional(joint)
-        else:
-            pa = np.random.dirichlet(concentration * np.ones(k), size=n)
-            pba = np.random.dirichlet(concentration / k * np.ones(k), size=[n, k])
-            return CategoricalStatic(pa, pba)
+        pa = np.random.dirichlet(concentration * np.ones(k), size=n)
+        condconcentration = concentration if dense else concentration / k
+        pba = np.random.dirichlet(condconcentration * np.ones(k), size=[n, k])
+        return CategoricalStatic(pa, pba, from_probas=True)
 
 
 class CategoricalStatic:
@@ -180,31 +173,26 @@ def test_ConditionalStatic():
     assert scoredist < 1e-4, scoredist
 
     # ensure that reverse is reversible
-    distrib = sample_joint(3, 17, 1, False)
+    distrib = sample_joint(3, 17, 1, True)
     assert np.allclose(0, distrib.reverse().reverse().sqdistance(distrib))
 
     distrib.kullback_leibler(distrib.reverse())
-    a, b = distrib.sample(10000)
+    n = 10000
+    a, b = distrib.sample(n)
     c = a * distrib.k + b
-    approx = np.bincount(c[0]) / c.shape[1]
+    val, approx = np.unique(c[0], return_counts=True)
+    approx = approx.astype(float)/n
     joint = distrib.to_joint()[0].flatten()
-    assert np.allclose(joint, approx, atol=1e-2, rtol=1e-1)
+    assert np.allclose(joint, approx, atol=1e-2, rtol=1e-1), print(joint, approx)
 
 
-def experiment(k, n, concentration, intervention,
-               symmetric_init=True, symmetric_intervention=False):
+def experiment(k, n, concentration, intervention, dense_init=True):
     """Sample n mechanisms of order k and for each of them sample an intervention on the desired
     mechanism. Return the distance between the original distribution and the intervened
     distribution in the causal parameter space and in the anticausal parameter space.
-
-    :param intervention: takes value 'cause' or 'effect'
-    :param symmetric_init: sample the causal parameters such that the marginals on a and b are
-    drawn from the same distribution
-    :param symmetric_intervention: sample the intervention parameters from the same law as the
-    initial parameters
     """
     # causal parameters
-    causal = sample_joint(k, n, concentration, symmetric_init)
+    causal = sample_joint(k, n, concentration, dense_init)
     transfer = causal.intervention(on=intervention, concentration=concentration)
     cpd, csd = causal.sqdistance(transfer)
 
@@ -219,10 +207,8 @@ def experiment(k, n, concentration, intervention,
 def test_experiment():
     print('test experiment')
     for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
-        for symmetric_init in [True, False]:
-            for symmetric_intervention in [True, False]:
-                experiment(2, 3, 1, intervention, symmetric_init,
-                           symmetric_intervention)
+        for dense_init in [True, False]:
+                experiment(2, 3, 1, intervention, dense_init)
 
 
 class CategoricalModule(nn.Module):
@@ -357,7 +343,7 @@ def init_mle(n0: int, static: CategoricalStatic):
 
 def experiment_optimize(k, n, T, lr, intervention,
                         concentration=1,
-                        is_init_symmetric=True,
+                        is_init_dense=False,
                         batch_size=10, scheduler_exponent=0, n0=10,
                         log_interval=10, use_map=False):
     """Measure optimization speed and parameters distance.
@@ -368,14 +354,8 @@ def experiment_optimize(k, n, T, lr, intervention,
     intervention on the desired mechanism. Use SGD to update a causal
     and an anticausal model for T steps. At each step, measure KL
     and distance in scores for causal and anticausal directions.
-
-    :param intervention: takes value 'cause' or 'effect'
-    :param is_init_symmetric: sample the causal parameters such that the marginals on a and b are
-    drawn from the same distribution
-    :param is_intervention_symmetric: sample the intervention parameters from the same law as the
-    initial parameters
     """
-    causalstatic = sample_joint(k, n, concentration, is_init_symmetric)
+    causalstatic = sample_joint(k, n, concentration, is_init_dense)
     transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()

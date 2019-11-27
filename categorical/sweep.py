@@ -138,7 +138,7 @@ def two_plots(results, nsteps, plotname, dirname):
     skiplist = ['causal', 'anti', 'joint']  # , 'MAP_uniform', 'MAP_source']
     confidence = (5, 95)
     curves = curve_plot(bestof, figsize, skiplist, confidence)
-    initstring = 'syminit' if results[0]["is_init_symmetric"] else 'asyminit'
+    initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
     curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
                     f'{initstring},  k={results[0]["k"]}')
     scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
@@ -154,11 +154,7 @@ def two_plots(results, nsteps, plotname, dirname):
 
 def all_plot():
     results_dir = 'results'
-
-    # basefile = 'asyminter_asyminit_parameter_sweep_'
-    # for k in [10, 50, 100]:
-
-    for init in ['syminit_', 'asyminit_']:
+    for init in ['sparseinit_']:
         basefile = 'sweep2_' + init
         for k in [10, 20, 50]:
             nsteps = k ** 2 // 4

@@ -12,24 +12,21 @@ def all_distances():
 
     results = []
     for intervention in ['cause', 'effect']:
-        for symmetric_init in [True, False]:
-            for symmetric_intervention in [True, False]:
-                for concentration in [0.1, 1, 10]:
-                    distances = []
-                    for k in kk:
-                        distances.append(distances1.experiment(
-                            k, n, 1, intervention, symmetric_init,
-                            symmetric_intervention))
-
-                    exp = {
-                        'intervention': intervention,
-                        'symmetric_init': symmetric_init,
-                        'symmetric_intervention': symmetric_intervention,
-                        'concentration': concentration,
-                        'dimensions': kk,
-                        'distances': np.array(distances)
-                    }
-                    results.append(exp)
+        for dense_init in [True, False]:
+            for concentration in [0.1, 1, 10]:
+                distances = []
+                for k in kk:
+                    distances.append(distances1.experiment(
+                        k, n, 1, intervention, dense_init
+                    ))
+                exp = {
+                    'intervention': intervention,
+                    'dense_init': dense_init,
+                    'concentration': concentration,
+                    'dimensions': kk,
+                    'distances': np.array(distances)
+                }
+                results.append(exp)
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
@@ -66,17 +63,16 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k, init=False, seed=17):
+def parameter_sweep(intervention, k, init, seed=17):
     results = []
     base_experiment = {
         'n': 100, 'k': k, 'T': 1500,
         'batch_size': 1,
         'intervention': intervention,
-        'is_init_symmetric': init,
+        'is_init_dense': init,
         'concentration': 1, 'use_map': False
     }
     for exponent in [0]:
-        # for lr in [1, 2, 3, 4]:
         for lr in [.03, .1, .3, 1, 3, 9, 30]:
             np.random.seed(seed)
             parameters = {'lr': lr, 'n0': 1, 'scheduler_exponent': exponent, **base_experiment}
@@ -87,10 +83,10 @@ def parameter_sweep(intervention, k, init=False, seed=17):
     os.makedirs(savedir, exist_ok=True)
 
     savefile = f'{intervention}_k={k}.pkl'
-    if base_experiment['is_init_symmetric']:
-        savefile = 'syminit_' + savefile
+    if base_experiment['is_init_dense']:
+        savefile = 'denseinit_' + savefile
     else:
-        savefile = 'asyminit_' + savefile
+        savefile = 'sparseinit_' + savefile
     savefile = 'sweep2_' + savefile
 
     savepath = os.path.join(savedir, savefile)
@@ -100,7 +96,7 @@ def parameter_sweep(intervention, k, init=False, seed=17):
 
 if __name__ == "__main__":
     # optimize_distances()
-    for init in [True, False]:
+    for init in [False]:
         for k in [10, 20, 50]:
             parameter_sweep('cause', k, init)
             parameter_sweep('effect', k, init)
