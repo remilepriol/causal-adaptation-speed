@@ -159,40 +159,43 @@ def all_plot():
         for k in [10, 20, 50]:
             nsteps = k ** 2 // 4
             allresults = defaultdict(list)
-            for intervention in ['cause', 'effect', 'independent', 'geometric']:
-                # , 'weightedgeo']:
+            for intervention in ['cause', 'effect', 'gmechanism']:
+                # 'independent', 'geometric', 'weightedgeo']:
                 plotname = f'{intervention}_k={k}'
                 file = basefile + plotname + '.pkl'
-                with open(os.path.join(results_dir, file), 'rb') as fin:
-                    results = pickle.load(fin)
-                    # Optimize hyperparameters for nsteps such that curves are k-invariant
-                    two_plots(results, nsteps, plotname=plotname,
-                              dirname=basefile[:-1])
-                    allresults[intervention] = results
+                filepath = os.path.join(results_dir, file)
+                if os.path.isfile(filepath):
+                    with open(filepath, 'rb') as fin:
+                        results = pickle.load(fin)
+                        # Optimize hyperparameters for nsteps such that curves are k-invariant
+                        two_plots(results, nsteps, plotname=plotname,
+                                  dirname=basefile[:-1])
+                        allresults[intervention] = results
 
-            # now let's combine results from intervention on cause and effect
-            # let's also report statistics about pooled results
-            combineds = []
-            pooleds = []
-            for e1, e2 in zip(allresults['cause'], allresults['effect']):
-                assert e1['lr'] == e2['lr']
-                combined = e1.copy()
-                pooled = e1.copy()
-                for key in e2.keys():
-                    if key.startswith(('scoredist', 'kl')):
-                        combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
-                        # pooled records the average over 10 cause and 10 effect interventions
-                        # the goal is to have tighter percentile curves
-                        # which are representative of the algorithm's performance
-                        meantraj = (e1[key] + e2[key]) / 2
-                        bs = 5
-                        pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
-                                                for i in range(meantraj.shape[1] // bs)]).T
-                combineds += [combined]
-                pooleds += [pooled]
-            if len(combineds) > 0:
-                two_plots(combineds, nsteps, plotname=f'combined_k={k}', dirname=basefile[:-1])
-                two_plots(pooleds, nsteps, plotname=f'pooled_k={k}', dirname=basefile[:-1])
+            if 'cause' in allresults and 'effect' in allresults:
+                # now let's combine results from intervention on cause and effect
+                # let's also report statistics about pooled results
+                combineds = []
+                pooleds = []
+                for e1, e2 in zip(allresults['cause'], allresults['effect']):
+                    assert e1['lr'] == e2['lr']
+                    combined = e1.copy()
+                    pooled = e1.copy()
+                    for key in e2.keys():
+                        if key.startswith(('scoredist', 'kl')):
+                            combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
+                            # pooled records the average over 10 cause and 10 effect interventions
+                            # the goal is to have tighter percentile curves
+                            # which are representative of the algorithm's performance
+                            meantraj = (e1[key] + e2[key]) / 2
+                            bs = 5
+                            pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
+                                                    for i in range(meantraj.shape[1] // bs)]).T
+                    combineds += [combined]
+                    pooleds += [pooled]
+                if len(combineds) > 0:
+                    two_plots(combineds, nsteps, plotname=f'combined_k={k}', dirname=basefile[:-1])
+                    two_plots(pooleds, nsteps, plotname=f'pooled_k={k}', dirname=basefile[:-1])
 
 
 if __name__ == '__main__':

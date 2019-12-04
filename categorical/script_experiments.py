@@ -98,8 +98,10 @@ if __name__ == "__main__":
     # optimize_distances()
     for init in [False]:
         for k in [10, 20, 50]:
-            parameter_sweep('cause', k, init)
-            parameter_sweep('effect', k, init)
+            # parameter_sweep('mechanism', k, init)
+            parameter_sweep('gmechanism', k, init)
+            # parameter_sweep('cause', k, init)
+            # parameter_sweep('effect', k, init)
             # parameter_sweep('geometric', k, init)
             # parameter_sweep('weightedgeo', k, init)
             # parameter_sweep('independent', k, init)

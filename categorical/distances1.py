@@ -35,7 +35,7 @@ def sample_joint(k, n, concentration=1, dense=False, logits=True):
     if logits:
         sa = stats.loggamma.rvs(concentration, size=(n, k))
         if dense:
-            sba = - stats.loggamma.rvs(concentration, size=(n, k, k))
+            sba = stats.loggamma.rvs(concentration, size=(n, k, k))
         else:
             # use the fact that a loggamma is well approximated by a negative exponential
             # for small values of the shape parameter with the transformation scale = 1/ shape
@@ -124,6 +124,7 @@ class CategoricalStatic:
             newmarginal = logit2proba(np.sum(self.sba * self.marginal[:, :, None], axis=1))
         else:
             newmarginal = np.random.dirichlet(concentration * np.ones(self.k), size=self.n)
+
         # TODO use logits of the marginal for stability certainty
         # replace the cause or the effect by this marginal
         if on == 'cause':
@@ -132,6 +133,24 @@ class CategoricalStatic:
             # intervention on effect
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
+        elif on == 'mechanism':
+            # sample from a dirichlet centered on each conditional
+            sba = np.zeros_like(self.sba)  # in logits space
+            for i in range(self.n):
+                for j in range(self.k):
+                    for k in range(self.k):
+                        p = self.conditional[i, j, k]
+                        if p < 1e-10:  # small
+                            sba[i, j, k] = - stats.expon.rvs(scale=1 / p)
+                        else:
+                            sba[i, j, k] = stats.loggamma.rvs(p)
+            sba -= sba.mean(axis=2, keepdims=True)
+            return CategoricalStatic(self.sa, sba, from_probas=False)
+        elif on == 'gmechanism':
+            # sample from a gaussian centered on each conditional
+            sba = np.random.normal(self.sba, self.sba.std())
+            sba -= sba.mean(axis=2, keepdims=True)
+            return CategoricalStatic(self.sa, sba, from_probas=False)
         else:
             raise ValueError(f'Intervention on {on} is not supported.')
 
@@ -181,7 +200,7 @@ def test_ConditionalStatic():
     a, b = distrib.sample(n)
     c = a * distrib.k + b
     val, approx = np.unique(c[0], return_counts=True)
-    approx = approx.astype(float)/n
+    approx = approx.astype(float) / n
     joint = distrib.to_joint()[0].flatten()
     assert np.allclose(joint, approx, atol=1e-2, rtol=1e-1), print(joint, approx)
 
@@ -206,9 +225,10 @@ def experiment(k, n, concentration, intervention, dense_init=True):
 
 def test_experiment():
     print('test experiment')
-    for intervention in ['cause', 'effect', 'independent', 'geometric', 'weightedgeo']:
+    for intervention in ['cause', 'effect', 'mechanism', 'gmechanism', 'independent', 'geometric',
+                         'weightedgeo']:
         for dense_init in [True, False]:
-                experiment(2, 3, 1, intervention, dense_init)
+            experiment(2, 3, 1, intervention, dense_init)
 
 
 class CategoricalModule(nn.Module):
@@ -440,10 +460,11 @@ def experiment_optimize(k, n, T, lr, intervention,
 
 
 def test_experiment_optimize():
-    experiment_optimize(k=2, n=3, T=6, lr=.1,
-                        batch_size=4,
-                        log_interval=1,
-                        intervention='cause')
+    for intervention in ['cause', 'effect', 'mechanism', 'gmechanism']:
+        experiment_optimize(
+            k=2, n=3, T=6, lr=.1, batch_size=4, log_interval=1,
+            intervention=intervention
+        )
 
 
 if __name__ == "__main__":
