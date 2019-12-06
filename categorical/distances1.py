@@ -331,8 +331,15 @@ class JointModule(nn.Module):
         return F.log_softmax(self.logits, dim=1)[rows, index]
 
     def kullback_leibler(self, other):
+        if isinstance(other, CategoricalModule):
+            ologits = other.to_joint().detach().view(self.n, self.k**2)
+            print(torch.logsumexp(ologits, dim=1))
+        elif isinstance(other, JointModule):
+            ologits = other.logits
+        else:
+            raise ValueError(other)
         a = self.logpartition
-        kl = torch.sum((self.logits - other.logits) * torch.exp(self.logits - a[:, None]), dim=1)
+        kl = torch.sum((self.logits - ologits) * torch.exp(self.logits - a[:, None]), dim=1)
         return kl - a + other.logpartition
 
     def scoredist(self, other):
