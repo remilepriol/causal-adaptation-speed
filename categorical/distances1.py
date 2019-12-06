@@ -240,7 +240,7 @@ class CategoricalModule(nn.Module):
         super(CategoricalModule, self).__init__()
         self.n, self.k = tuple(sa.shape)
 
-        sa = sa.clone().detach() if torch.is_tensor(sa) else  torch.tensor(sa)
+        sa = sa.clone().detach() if torch.is_tensor(sa) else torch.tensor(sa)
         sba = sba.clone().detach() if torch.is_tensor(sba) else torch.tensor(sba)
         self.sa = nn.Parameter(sa.to(torch.float32))
         self.sba = nn.Parameter(sba.to(torch.float32))
@@ -314,8 +314,8 @@ class JointModule(nn.Module):
         self.n, k2 = logits.shape  # logits is flat
 
         self.k = int(np.sqrt(k2))
-        if self.k ** 2 != k2:
-            raise ValueError('Logits matrix can not be reshaped to square.')
+        # if self.k ** 2 != k2:
+        #     raise ValueError('Logits matrix can not be reshaped to square.')
 
         # normalize to sum to 0
         logits = logits - logits.mean(dim=1, keepdim=True)
@@ -517,6 +517,10 @@ def experiment_guess(
     optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
     optimizer = optim.ASGD([p for m in models for p in m.parameters()], **optkwargs)
 
+    # intervention guess
+    marginalA = JointModule(causal.sa)
+    marginalB = JointModule(anticausal.sa)
+
     steps = []
     ans = defaultdict(list)
     for step in tqdm.tqdm(range(T)):
@@ -549,6 +553,9 @@ def experiment_guess(
             # step 2, estimate likelihood of samples aa and bb for each marginals
             # of the reference model and take the lowest likelihood as a guess
             # for the intervention. Take the average over all examples seen until now
+            with torch.no_grad():
+                ans['loglikelihoodA'].append(marginalA(torch.zeros_like(aa), aa))
+                ans['loglikelihoodB'].append(marginalB(torch.zeros_like(bb), bb))
 
         loss.backward()
         optimizer.step()
