@@ -18,13 +18,13 @@ def joint2conditional(joint):
     return CategoricalStatic(marginal, conditional)
 
 
-def jointlogit2conditional(joint):
+def jointlogit2conditional(joint, is_btoa):
     sa = logsumexp(joint)
     sa -= sa.mean(axis=1, keepdims=True)
     sba = joint - sa[:, :, np.newaxis]
     sba -= sba.mean(axis=2, keepdims=True)
 
-    return CategoricalStatic(sa, sba, from_probas=False)
+    return CategoricalStatic(sa, sba, from_probas=False, is_btoa=is_btoa)
 
 
 def sample_joint(k, n, concentration=1, dense=False, logits=True):
@@ -53,13 +53,14 @@ def sample_joint(k, n, concentration=1, dense=False, logits=True):
 class CategoricalStatic:
     """Represent n categorical distributions of variables (a,b) of dimension k each."""
 
-    def __init__(self, marginal, conditional, from_probas=True):
+    def __init__(self, marginal, conditional, from_probas=True, is_btoa=False):
         """The distribution is represented by a marginal p(a) and a conditional p(b|a)
 
         marginal is n*k array.
         conditional is n*k*k array. Each element conditional[i,j,k] is p_i(b=k |a=j)
         """
         self.n, self.k = marginal.shape
+        self.BtoA = is_btoa
 
         if not conditional.shape == (self.n, self.k, self.k):
             raise ValueError(
@@ -91,7 +92,7 @@ class CategoricalStatic:
         """
         joint = self.to_joint(return_probas=False)
         joint = np.swapaxes(joint, 1, 2)  # invert variables
-        return jointlogit2conditional(joint)
+        return jointlogit2conditional(joint, not self.BtoA)
 
     def probadist(self, other):
         pd = np.sum((self.marginal - other.marginal) ** 2, axis=1)
@@ -134,6 +135,7 @@ class CategoricalStatic:
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
         elif on == 'mechanism':
+            # TODO THIS IS WRONG AND UNSTABLE
             # sample from a dirichlet centered on each conditional
             sba = np.zeros_like(self.sba)  # in logits space
             for i in range(self.n):
@@ -167,7 +169,7 @@ class CategoricalStatic:
             return torch.from_numpy(a), torch.from_numpy(b)
 
     def to_module(self):
-        return CategoricalModule(self.sa, self.sba)
+        return CategoricalModule(self.sa, self.sba, is_btoa=self.BtoA)
 
     def __repr__(self):
         return (f"n={self.n} categorical of dimension k={self.k}\n"
@@ -234,11 +236,15 @@ def test_experiment():
 class CategoricalModule(nn.Module):
     """Represent n categorical conditionals as a pytorch module"""
 
-    def __init__(self, sa, sba):
+    def __init__(self, sa, sba, is_btoa=False):
         super(CategoricalModule, self).__init__()
         self.n, self.k = tuple(sa.shape)
-        self.sa = nn.Parameter(torch.tensor(sa))
-        self.sba = nn.Parameter(torch.tensor(sba))
+
+        sa = sa.clone().detach() if torch.is_tensor(sa) else  torch.tensor(sa)
+        sba = sba.clone().detach() if torch.is_tensor(sba) else torch.tensor(sba)
+        self.sa = nn.Parameter(sa.to(torch.float32))
+        self.sba = nn.Parameter(sba.to(torch.float32))
+        self.BtoA = is_btoa
 
     def forward(self, a, b):
         """
@@ -249,6 +255,8 @@ class CategoricalModule(nn.Module):
         where model 1 explains first row of a,b,
         model 2 explains row 2 and so forth.
         """
+        if self.BtoA:
+            a, b = b, a
         rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1])
         return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)]
 
@@ -284,7 +292,7 @@ def test_CategoricalModule(n=7, k=5):
 
     # test that reverse is numerically stable
     kls = references.reverse().reverse().to_module().kullback_leibler(modules)
-    assert torch.allclose(torch.zeros(n, dtype=torch.double), kls), kls
+    assert torch.allclose(torch.zeros(n), kls), kls
 
     # test optimization
     optimizer = optim.SGD(modules.parameters(), lr=1)
@@ -337,7 +345,7 @@ class JointModule(nn.Module):
 class MaximumLikelihoodEstimator:
 
     def __init__(self, n, k):
-        self.counts = torch.ones((n, k, k), dtype=torch.double)
+        self.counts = torch.ones((n, k, k))
 
     @property
     def total(self):
@@ -443,7 +451,7 @@ def experiment_optimize(k, n, T, lr, intervention,
         else:
             aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
             causalloss = - causal(aa, bb).sum() / batch_size
-            antiloss = - anticausal(bb, aa).sum() / batch_size
+            antiloss = - anticausal(aa, bb).sum() / batch_size
             jointloss = - joint(aa, bb).sum() / batch_size
             if use_map:
                 countestimator.update(aa, bb)
@@ -460,11 +468,104 @@ def experiment_optimize(k, n, T, lr, intervention,
 
 
 def test_experiment_optimize():
-    for intervention in ['cause', 'effect', 'mechanism', 'gmechanism']:
+    for intervention in ['cause', 'effect', 'gmechanism']:
         experiment_optimize(
             k=2, n=3, T=6, lr=.1, batch_size=4, log_interval=1,
             intervention=intervention
         )
+
+
+def experiment_guess(
+        k, n, T, lr, intervention,
+        concentration=1, is_init_dense=False,
+        batch_size=10, scheduler_exponent=0, log_interval=10
+):
+    """Measure optimization speed after guessing intervention.
+
+    Sample n mechanisms of order k and for each of them sample an
+    intervention on the desired mechanism. Initialize a causal and
+    an anticausal model to the reference distribution. Duplicate them
+    and initialize one module of each duplicata to the uniform.
+    Run the optimization and record KL and distance. Also record the
+    accuracy of guessing the intervention based on the lowest KL.
+    """
+    causalstatic = sample_joint(k, n, concentration, is_init_dense)
+    transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
+    causal = causalstatic.to_module()
+    transfer = transferstatic.to_module()
+
+    anticausal = causalstatic.reverse().to_module()
+    antitransfer = transferstatic.reverse().to_module()
+
+    joint = JointModule(causal.to_joint().detach().view(n, -1))
+    jointtransfer = JointModule(transfer.to_joint().detach().view(n, -1))
+
+    # TODO put all models and their transfer into a dict
+    models = [causal, anticausal, joint]
+    targets = [transfer, antitransfer, jointtransfer]
+
+    # step 1 : duplicate models with intervention guessing
+    causalguessA = CategoricalModule(torch.zeros([n, k]), causal.sba)
+    causalguessB = CategoricalModule(causal.sa, torch.zeros([n, k, k]))
+
+    antiguessB = CategoricalModule(torch.zeros([n, k]), anticausal.sba)
+    antiguessA = CategoricalModule(anticausal.sa, torch.zeros([n, k, k]))
+
+    models += [causalguessA, causalguessB, antiguessA, antiguessB]
+    targets += [transfer, transfer, antitransfer, antitransfer]
+
+    optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
+    optimizer = optim.ASGD([p for m in models for p in m.parameters()], **optkwargs)
+
+    steps = []
+    ans = defaultdict(list)
+    for step in tqdm.tqdm(range(T)):
+
+        # EVALUATION
+        if step % log_interval == 0:
+            steps.append(step)
+            with torch.no_grad():
+
+                for model, target, name in zip(models, targets, ['causal', 'anti', 'joint']):
+                    # SGD
+                    ans[f'kl_{name}'].append(target.kullback_leibler(model))
+                    ans[f'scoredist_{name}'].append(target.scoredist(model))
+
+                    # ASGD
+                    with AveragedModel(model, optimizer):
+                        ans[f'kl_{name}_average'].append(target.kullback_leibler(model))
+                        ans[f'scoredist_{name}_average'].append(target.scoredist(model))
+
+        # UPDATE
+        optimizer.lr = lr / step ** scheduler_exponent
+        optimizer.zero_grad()
+
+        if batch_size == 'full':
+            loss = sum([t.kullback_leibler(m).sum() for m, t in zip(models, targets)])
+        else:
+            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
+            loss = sum([- m(aa, bb).sum() for m in models]) / batch_size
+
+            # step 2, estimate likelihood of samples aa and bb for each marginals
+            # of the reference model and take the lowest likelihood as a guess
+            # for the intervention. Take the average over all examples seen until now
+
+        loss.backward()
+        optimizer.step()
+
+    for key, item in ans.items():
+        ans[key] = torch.stack(item).numpy()
+
+    return {'steps': np.array(steps), **ans}
+
+
+def test_experiment_guess():
+    for bs in ['full', 4]:
+        for intervention in ['cause', 'effect']:
+            experiment_guess(
+                k=5, n=10, T=6, lr=.1, batch_size=bs, log_interval=1,
+                intervention=intervention
+            )
 
 
 if __name__ == "__main__":
@@ -472,3 +573,4 @@ if __name__ == "__main__":
     test_experiment()
     test_CategoricalModule()
     test_experiment_optimize()
+    test_experiment_guess()
