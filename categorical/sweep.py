@@ -5,9 +5,23 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 
-from categorical.script_plot import COLORS
-
 np.set_printoptions(precision=2)
+
+COLORS = {
+    'causal': 'blue',
+    'anti': 'red',
+    'joint': 'palegreen',
+    'causal_average': 'darkblue',
+    'anti_average': 'darkred',
+    'joint_average': 'darkgreen',
+    'MAP_uniform': 'yellow',
+    'MAP_source': 'gold',
+    # guess
+    'CausalGuessA': 'lightskyblue',
+    'CausalGuessB': 'deepskyblue',
+    'AntiGuessA': 'salmon',
+    'AntiGuessB': 'chocolate',
+}
 
 
 def value_at_step(trajectory, nsteps=1000):
@@ -34,8 +48,8 @@ def get_best(results, nsteps):
     by_model = {}
     for exp in results:
         relevant_parameters = {
-            key: exp[key] for key in
-            ['k', 'lr', 'n0', 'scheduler_exponent', 'steps']}
+            key: exp[key] for key in exp
+            if key in ['k', 'lr', 'n0', 'scheduler_exponent', 'steps']}
 
         for model, metric in value_at_step(exp, nsteps).items():
             if model not in by_model:
@@ -65,14 +79,10 @@ def get_best(results, nsteps):
     return by_model
 
 
-def curve_plot(bestof, figsize, skiplist, confidence=(5, 95)):
+def curve_plot(bestof, nsteps, figsize, confidence=(5, 95)):
     """Draw mean trajectory plot with percentiles"""
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
     for model, item in bestof.items():
-        # discard non averaged models
-        if model in skiplist:
-            continue
-
         xx = item['steps']
         values = item['kl']
 
@@ -92,20 +102,19 @@ def curve_plot(bestof, figsize, skiplist, confidence=(5, 95)):
             color=COLORS[model]
         )
 
+    ax.axvline(nsteps, linestyle='--', color='black')
     ax.grid(True)
     # ax.set_yscale('log')
     ax.set_ylabel('$KL(p^*, p_t)$')
-    ax.set_xlabel('number of examples t')
+    ax.set_xlabel('number of samples t')
     ax.legend()
 
     return fig
 
 
-def scatter_plot(bestof, nsteps, figsize, skiplist):
+def scatter_plot(bestof, nsteps, figsize):
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
     for model, item in bestof.items():
-        if model in skiplist:
-            continue
         if 'scoredist' not in item:
             continue
         index = np.searchsorted(item['steps'], nsteps)
@@ -135,13 +144,16 @@ def two_plots(results, nsteps, plotname, dirname):
     print(plotname)
     bestof = get_best(results, nsteps)
     figsize = (6, 3)
-    skiplist = ['causal', 'anti', 'joint']  # , 'MAP_uniform', 'MAP_source']
+    # remove the models I don't want to compare
+    # eg remove SGD, MAP. Keep ASGD and rename them to remove average.
+    selected = {key[:-len('_average')]: item for key, item in bestof.items()
+                if key.endswith('_average')}
     confidence = (5, 95)
-    curves = curve_plot(bestof, figsize, skiplist, confidence)
+    curves = curve_plot(selected, nsteps, figsize, confidence)
     initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
-    curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
-                    f'{initstring},  k={results[0]["k"]}')
-    scatter = scatter_plot(bestof, nsteps, figsize, skiplist)
+    # curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
+    #                 f'{initstring},  k={results[0]["k"]}')
+    scatter = scatter_plot(selected, nsteps, figsize)
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
         for figpath in [os.path.join('plots', dirname, style, f'{plotname}.pdf')]:
             os.makedirs(os.path.dirname(figpath), exist_ok=True)
@@ -154,20 +166,21 @@ def two_plots(results, nsteps, plotname, dirname):
 
 def all_plot():
     results_dir = 'results'
-    for init in ['sparseinit_']:
-        basefile = 'sweep2_' + init
+    for init in ['denseinit_']:
+        # basefile = 'sweep2_' + init
+        basefile = 'guess_' + init
         for k in [10, 20, 50]:
+            # Optimize hyperparameters for nsteps such that curves are k-invariant
             nsteps = k ** 2 // 4
             allresults = defaultdict(list)
-            for intervention in ['cause', 'effect', 'gmechanism']:
-                # 'independent', 'geometric', 'weightedgeo']:
+            for intervention in ['cause', 'effect']:
+                # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
                 plotname = f'{intervention}_k={k}'
                 file = basefile + plotname + '.pkl'
                 filepath = os.path.join(results_dir, file)
                 if os.path.isfile(filepath):
                     with open(filepath, 'rb') as fin:
                         results = pickle.load(fin)
-                        # Optimize hyperparameters for nsteps such that curves are k-invariant
                         two_plots(results, nsteps, plotname=plotname,
                                   dirname=basefile[:-1])
                         allresults[intervention] = results
