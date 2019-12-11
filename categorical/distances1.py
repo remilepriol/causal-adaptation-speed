@@ -327,8 +327,8 @@ class JointModule(nn.Module):
         return torch.logsumexp(self.logits, dim=1)
 
     def forward(self, a, b):
-        batch_size =  a.shape[1]
-        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1]).view(-1)
+        batch_size = a.shape[1]
+        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, batch_size).view(-1)
         index = (a * self.k + b).view(-1)
         return F.log_softmax(self.logits, dim=1)[rows, index].view(self.n, batch_size)
 
@@ -504,16 +504,18 @@ def experiment_guess(
 
     # TODO put all models and their transfer into a dict
     models = [causal, anticausal, joint]
+    names = ['causal', 'anti', 'joint']
     targets = [transfer, antitransfer, jointtransfer]
 
     # step 1 : duplicate models with intervention guessing
-    causalguessA = CategoricalModule(torch.zeros([n, k]), causal.sba)
-    causalguessB = CategoricalModule(causal.sa, torch.zeros([n, k, k]))
+    causalguessA = CategoricalModule(torch.zeros([n, k]), causal.sba, is_btoa=False)
+    causalguessB = CategoricalModule(causal.sa, torch.zeros([n, k, k]), is_btoa=False)
 
-    antiguessB = CategoricalModule(torch.zeros([n, k]), anticausal.sba)
-    antiguessA = CategoricalModule(anticausal.sa, torch.zeros([n, k, k]))
+    antiguessA = CategoricalModule(anticausal.sa, torch.zeros([n, k, k]), is_btoa=True)
+    antiguessB = CategoricalModule(torch.zeros([n, k]), anticausal.sba, is_btoa=True)
 
     models += [causalguessA, causalguessB, antiguessA, antiguessB]
+    names += ['CausalGuessA', 'CausalGuessB', 'AntiGuessA', 'AntiGuessB']
     targets += [transfer, transfer, antitransfer, antitransfer]
 
     optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
@@ -532,7 +534,7 @@ def experiment_guess(
             steps.append(step)
             with torch.no_grad():
 
-                for model, target, name in zip(models, targets, ['causal', 'anti', 'joint']):
+                for model, target, name in zip(models, targets, names):
                     # SGD
                     ans[f'kl_{name}'].append(target.kullback_leibler(model))
                     ans[f'scoredist_{name}'].append(target.scoredist(model))
