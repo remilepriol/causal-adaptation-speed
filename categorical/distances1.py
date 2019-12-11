@@ -255,10 +255,11 @@ class CategoricalModule(nn.Module):
         where model 1 explains first row of a,b,
         model 2 explains row 2 and so forth.
         """
+        batch_size = a.shape[1]
         if self.BtoA:
             a, b = b, a
-        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1])
-        return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)]
+        rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, batch_size)
+        return self.to_joint()[rows.view(-1), a.view(-1), b.view(-1)].view(self.n, batch_size)
 
     def to_joint(self):
         return F.log_softmax(self.sba, dim=2) \
@@ -326,9 +327,10 @@ class JointModule(nn.Module):
         return torch.logsumexp(self.logits, dim=1)
 
     def forward(self, a, b):
+        batch_size =  a.shape[1]
         rows = torch.arange(0, self.n).unsqueeze(1).repeat(1, a.shape[1]).view(-1)
         index = (a * self.k + b).view(-1)
-        return F.log_softmax(self.logits, dim=1)[rows, index]
+        return F.log_softmax(self.logits, dim=1)[rows, index].view(self.n, batch_size)
 
     def kullback_leibler(self, other):
         a = self.logpartition
@@ -554,8 +556,8 @@ def experiment_guess(
             # of the reference model and take the lowest likelihood as a guess
             # for the intervention. Take the average over all examples seen until now
             with torch.no_grad():
-                ans['loglikelihoodA'].append(marginalA(torch.zeros_like(aa), aa))
-                ans['loglikelihoodB'].append(marginalB(torch.zeros_like(bb), bb))
+                ans['loglikelihoodA'].append(marginalA(torch.zeros_like(aa), aa).mean(dim=1))
+                ans['loglikelihoodB'].append(marginalB(torch.zeros_like(bb), bb).mean(dim=1))
 
         loss.backward()
         optimizer.step()

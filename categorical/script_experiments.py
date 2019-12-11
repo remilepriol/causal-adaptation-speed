@@ -63,20 +63,25 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k, init, seed=17):
+def parameter_sweep(intervention, k, init, seed=17, guess=False):
     results = []
     base_experiment = {
         'n': 100, 'k': k, 'T': 1500,
         'batch_size': 1,
         'intervention': intervention,
         'is_init_dense': init,
-        'concentration': 1, 'use_map': False
+        'concentration': 1
     }
+    if not guess:
+        base_experiment = {'n0': 1, 'use_map': False, **base_experiment}
     for exponent in [0]:
         for lr in [.03, .1, .3, 1, 3, 9, 30]:
             np.random.seed(seed)
-            parameters = {'lr': lr, 'n0': 1, 'scheduler_exponent': exponent, **base_experiment}
-            trajectory = distances1.experiment_optimize(**parameters)
+            parameters = {'lr': lr, 'scheduler_exponent': exponent, **base_experiment}
+            if guess:
+                trajectory = distances1.experiment_guess(**parameters)
+            else:
+                trajectory = distances1.experiment_optimize(**parameters)
             results.append({**parameters, **trajectory})
 
     savedir = 'results'
@@ -87,7 +92,10 @@ def parameter_sweep(intervention, k, init, seed=17):
         savefile = 'denseinit_' + savefile
     else:
         savefile = 'sparseinit_' + savefile
-    savefile = 'sweep2_' + savefile
+    if guess:
+        savefile = 'guess_' + savefile
+    else:
+        savefile = 'sweep2_' + savefile
 
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
@@ -96,13 +104,14 @@ def parameter_sweep(intervention, k, init, seed=17):
 
 if __name__ == "__main__":
     # optimize_distances()
-    for init in [False]:
+    guess = True
+    for init_dense in [False]:
         for k in [10, 20, 50]:
-            # parameter_sweep('mechanism', k, init)
-            parameter_sweep('gmechanism', k, init)
-            # parameter_sweep('cause', k, init)
-            # parameter_sweep('effect', k, init)
-            # parameter_sweep('geometric', k, init)
-            # parameter_sweep('weightedgeo', k, init)
-            # parameter_sweep('independent', k, init)
+            parameter_sweep('cause', k, init_dense, guess=guess)
+            parameter_sweep('effect', k, init_dense, guess=guess)
+            # parameter_sweep('mechanism', k, init_dense)
+            # parameter_sweep('gmechanism', k, init_dense)
+            # parameter_sweep('geometric', k, init_dense)
+            # parameter_sweep('weightedgeo', k, init_dense)
+            # parameter_sweep('independent', k, init_dense)
 
