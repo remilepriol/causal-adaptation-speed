@@ -3,6 +3,7 @@ import scipy
 import scipy.linalg
 import scipy.stats
 
+
 class MeanConditionalNormal:
 
     def __init__(self, mua, cova, linear, bias, covcond):
@@ -125,6 +126,12 @@ class NaturalJointNormal:
         linearterm = -x @ self.eta - np.sum((x @ self.precision) * x, axis=1)
         return linearterm + self.logpartition
 
+    def distance(self, other):
+        return np.sqrt(
+            np.sum((self.eta - other.eta) ** 2)
+            + np.sum((self.precision - other.precision) ** 2)
+        )
+
 
 class NaturalConditionalNormal:
     """Joint Gaussian distribution between a cause variable A and an effect variable B.
@@ -193,11 +200,11 @@ class NaturalConditionalNormal:
     def distance(self, other):
         """Return Euclidean distance between self and other in natural parameter space."""
         return np.sqrt(
-                np.sum((self.etaa - other.etaa) ** 2)
-                + np.sum((self.preca - other.preca) ** 2)
-                + np.sum((self.linear - other.linear) ** 2)
-                + np.sum((self.bias - other.bias) ** 2)
-                + np.sum((self.preccond - other.preccond) ** 2)
+            np.sum((self.etaa - other.etaa) ** 2)
+            + np.sum((self.preca - other.preca) ** 2)
+            + np.sum((self.linear - other.linear) ** 2)
+            + np.sum((self.bias - other.bias) ** 2)
+            + np.sum((self.preccond - other.preccond) ** 2)
         )
 
     @property
@@ -225,13 +232,14 @@ class CholeskyConditionalNormal:
 
     def distance(self, other):
         return np.sqrt(
-                np.sum((self.za - other.za) ** 2)
-                + np.sum((self.la - other.la) ** 2)
-                + np.sum((self.linear - other.linear) ** 2)
-                + np.sum((self.bias - other.bias) ** 2)
-                + np.sum((self.lcond - other.lcond) ** 2)
+            np.sum((self.za - other.za) ** 2)
+            + np.sum((self.la - other.la) ** 2)
+            + np.sum((self.linear - other.linear) ** 2)
+            + np.sum((self.bias - other.bias) ** 2)
+            + np.sum((self.lcond - other.lcond) ** 2)
 
         )
+
 
 #  _____      _
 # |  __ \    (_)
