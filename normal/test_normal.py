@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import scipy
 
-import normal
+from normal import normal
 
 np.random.seed(1)
 
