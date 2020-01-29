@@ -3,15 +3,6 @@ import scipy
 import scipy.linalg
 import scipy.stats
 
-
-def check_symmetric(a, tol=1e-8):
-    if np.allclose(a, a.T, atol=tol):
-        return True
-    else:
-        print(a - a.T)
-        return False
-
-
 class MeanConditionalNormal:
 
     def __init__(self, mua, cova, linear, bias, covcond):
