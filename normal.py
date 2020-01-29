@@ -31,6 +31,21 @@ class MeanConditionalNormal:
         bias = preccond @ self.bias
         return NaturalConditionalNormal(etaa, preca, linear, bias, preccond)
 
+    def to_joint(self):
+        mub = np.dot(self.linear, self.mua) + self.bias
+        mean = np.concatenate([self.mua, mub], axis=0)
+
+        d = self.mua.shape[0]
+        crosscov = np.dot(self.cova, self.linear.T)
+        cov = np.zeros([2 * d, 2 * d])
+        cov[:d, :d] = self.cova
+        cov[:d, d:] = crosscov
+        cov[d:, :d] = crosscov.T
+        cov[d:, d:] = self.covcond + np.linalg.multi_dot([
+            self.linear, self.cova, self.linear.T])
+
+        return MeanJointNormal(mean, cov)
+
     def sample(self, n):
         aa = np.random.multivariate_normal(self.mua, self.cova, size=n)
         bb = np.dot(aa, self.linear.T) \
@@ -38,26 +53,46 @@ class MeanConditionalNormal:
         return aa, bb
 
 
-class MeanJoint:
+class MeanJointNormal:
 
-    def __init__(self, mu, cov):
-        self.mu = mu
+    def __init__(self, mean, cov):
+        self.mean = mean
         self.cov = cov
 
     def to_natural(self):
         precision = np.linalg.inv(self.cov)
-        return NaturalJoint(precision @ self.mu, precision)
+        return NaturalJointNormal(precision @ self.mean, precision)
+
+    def to_conditional(self):
+        d = self.mean.shape[0] // 2
+
+        # parameters of marginal on A
+        mua = self.mean[:d]
+        cova = self.cov[:d, :d]
+        preca = np.linalg.inv(cova)
+
+        # intermediate values required for calculus
+        mub = self.mean[d:]
+        covb = self.cov[d:, d:]
+        crosscov = self.cov[:d, d:]
+
+        # parameters of conditional
+        linear = np.dot(crosscov.T, preca)
+        bias = mub - np.dot(linear, mua)
+        covcond = covb - np.linalg.multi_dot([linear, cova, linear.T])
+
+        return MeanConditionalNormal(mua, cova, linear, bias, covcond)
 
     def sample(self, n):
-        return np.random.multivariate_normal(self.mu, self.cov, size=n)
+        return np.random.multivariate_normal(self.mean, self.cov, size=n)
 
     def encode(self, encoder):
-        mu = np.dot(encoder, self.mu)
+        mu = np.dot(encoder, self.mean)
         cov = np.linalg.multi_dot([encoder, self.cov, encoder.T])
-        return MeanJoint(mu, cov)
+        return MeanJointNormal(mu, cov)
 
 
-class NaturalJoint:
+class NaturalJointNormal:
 
     def __init__(self, eta, precision):
         self.eta = eta
@@ -65,7 +100,7 @@ class NaturalJoint:
 
     def to_mean(self):
         cov = np.linalg.inv(self.precision)
-        return MeanJoint(cov @ self.eta, cov)
+        return MeanJointNormal(cov @ self.eta, cov)
 
     def to_conditional(self):
         d = self.eta.shape[0] // 2
@@ -84,7 +119,7 @@ class NaturalJoint:
         d = self.eta.shape[0] // 2
         eta = np.roll(self.eta, d)
         precision = np.roll(self.precision, shift=[d, d], axis=[0, 1])
-        return NaturalJoint(eta, precision)
+        return NaturalJointNormal(eta, precision)
 
     @property
     def logpartition(self):
@@ -109,7 +144,6 @@ class NaturalConditionalNormal:
     """
 
     def __init__(self, etaa, preca, linear, bias, preccond):
-        self.dim = etaa.shape[0]
         # marginal
         self.etaa = etaa
         self.preca = preca
@@ -117,6 +151,18 @@ class NaturalConditionalNormal:
         self.linear = linear
         self.bias = bias
         self.preccond = preccond
+
+    def to_joint(self):
+        tmp = np.dot(self.linear.T, np.linalg.inv(self.preccond))
+        eta = np.concatenate([self.etaa - np.dot(tmp, self.bias), self.bias], axis=0)
+
+        d = self.etaa.shape[0]
+        precision = np.zeros([2 * d, 2 * d])
+        precision[:d, :d] = self.preca + np.dot(tmp, self.linear)
+        precision[:d, d:] = - self.linear.T
+        precision[d:, :d] = - self.linear
+        precision[d:, d:] = self.preccond
+        return NaturalJointNormal(eta, precision)
 
     def to_mean(self):
         cova = np.linalg.inv(self.preca)
@@ -128,52 +174,39 @@ class NaturalConditionalNormal:
 
     def to_cholesky(self):
         la = np.linalg.cholesky(self.preca)
+        assert np.allclose(la @ la.T, self.preca)
         lcond = np.linalg.cholesky(self.preccond)
-        lainv = np.linalg.inv(la)
-        lcondinv = np.linalg.inv(lcond)
         return CholeskyConditionalNormal(
-            za=np.dot(lainv, self.etaa),
+            za=np.linalg.solve(la, self.etaa),
             la=la,
-            linear=np.dot(lcondinv, self.linear),
-            bias=np.dot(lcondinv, self.bias),
+            linear=np.linalg.solve(lcond, self.linear),
+            bias=np.linalg.solve(lcond, self.bias),
             lcond=lcond
         )
 
     def intervention(self, on):
         """Sample natural parameters of a marginal distribution
         and substitute them in the cause or effect marginals."""
-        eta = np.random.randn(self.dim)
-        prec = wishart(self.dim).rvs()
+        eta = np.random.randn(self.etaa.shape[0])
+        prec = wishart(self.etaa.shape[0]).rvs()
         if on == 'cause':
             return NaturalConditionalNormal(eta, prec, self.linear, self.bias, self.preccond)
         elif on == 'effect':
             return NaturalConditionalNormal(
                 self.etaa, self.preca, np.zeros_like(self.linear), eta, prec)
 
-    def to_joint(self):
-        tmp = np.dot(self.linear.T, np.linalg.inv(self.preccond))
-        eta = np.concatenate([self.etaa - np.dot(tmp, self.bias), self.bias], axis=0)
-
-        d = self.dim
-        precision = np.zeros([2 * d, 2 * d])
-        precision[:d, :d] = self.preca + np.dot(tmp, self.linear)
-        precision[:d, d:] = - self.linear.T
-        precision[d:, :d] = - self.linear
-        precision[d:, d:] = self.preccond
-        return NaturalJoint(eta, precision)
-
     def reverse(self):
         """Return the ConditionalGaussian from B to A."""
         return self.to_joint().reverse().to_conditional()
 
-    def squared_distance(self, other):
-        """Return squared euclidean distance in natural parameter space."""
-        return (
+    def distance(self, other):
+        """Return Euclidean distance between self and other in natural parameter space."""
+        return np.sqrt(
                 np.sum((self.etaa - other.etaa) ** 2)
                 + np.sum((self.preca - other.preca) ** 2)
                 + np.sum((self.linear - other.linear) ** 2)
                 + np.sum((self.bias - other.bias) ** 2)
-                + np.sum((self.preccond - other.condprec) ** 2)
+                + np.sum((self.preccond - other.preccond) ** 2)
         )
 
     @property
@@ -194,13 +227,13 @@ class CholeskyConditionalNormal:
         return NaturalConditionalNormal(
             etaa=np.dot(self.la, self.za),
             preca=np.dot(self.la, self.la.T),
-            linear=np.dot(self.lcond.T, self.linear),
-            bias=np.dot(self.lcond.T, self.bias),
+            linear=np.dot(self.lcond, self.linear),
+            bias=np.dot(self.lcond, self.bias),
             preccond=np.dot(self.lcond, self.lcond.T)
         )
 
-    def squared_distance(self, other):
-        return (
+    def distance(self, other):
+        return np.sqrt(
                 np.sum((self.za - other.za) ** 2)
                 + np.sum((self.la - other.la) ** 2)
                 + np.sum((self.linear - other.linear) ** 2)
@@ -253,111 +286,3 @@ def sample_cholesky(dim):
     lowercond = sample_triangular(dim)
 
     return CholeskyConditionalNormal(zetaa, lowera, linear, bias, lowercond)
-
-
-def test_Normals(dim=2):
-    ConditionalGaussian.random(dim, symmetric=False)
-    a = ConditionalGaussian.random(dim, symmetric=True)
-    b = a.intervene_on_cause()
-    a.intervene_on_effect()
-    a.reverse()
-    a.squared_distance(b)
-    a.sample(10)
-    transform = scipy.stats.ortho_group.rvs(2 * dim)
-    c = a.encode(transform)
-    d = b.encode(transform)
-
-    a.is_consistent()
-    b.is_consistent()
-    c.is_consistent()
-    d.is_consistent()
-
-    # print("causal distance after intervention", a.squared_distances(b))
-    # print("transformed after intervention", c.squared_distances(d))
-
-    dist = a.reverse().reverse().squared_distance(a)
-    assert np.allclose(dist, 0), print("reverse reverse", dist)
-    dist = c.reverse().reverse().squared_distance(c)
-    assert np.allclose(dist, 0), print("reverse reverse", dist)
-    dist = a.reverse(viajoint=True).squared_distance(a.reverse(viajoint=False))
-    assert np.allclose(dist, 0), print("reverse vs joint reverse", dist)
-
-
-test_ConditionalGaussian()
-
-
-def gaussian_distances(k, n, intervention='cause', symmetric=False):
-    """Sample  n conditional Gaussians between cause and effect of dimension k
-    and evaluate the distance after intervention between causal and anticausal models."""
-
-    ans = np.zeros([n, 6])
-    for i in range(n):
-        # sample mechanisms
-        original = ConditionalGaussian.random(k, symmetric)
-        revorig = original.reverse()
-
-        if intervention == 'cause':
-            transfer = original.intervene_on_cause()
-        else:  # intervention on effect
-            transfer = original.intervene_on_effect()
-        revtrans = transfer.reverse()
-
-        meandist, natdist = original.squared_distance(transfer)
-        revmeandist, revnatdist = revorig.squared_distance(revtrans)
-
-        ans[i] = np.array([meandist, revmeandist, revmeandist / meandist,
-                           natdist, revnatdist, revnatdist / natdist])
-
-    return ans
-
-
-gaussian_distances(3, 4)
-
-
-def transform_distances(k, n, m, intervention='cause', transformation='orthonormal',
-                        noiserange=None):
-    """ Evaluate distance induced by interventions and orthonormal transformations.
-
-    Sample  n conditional Gaussians between cause and effect of dimension k.
-    For each of these reference distribution, sample an intervention.
-    Sample m orthonormal encoder of dimension 2k.
-    Get the n*(m+2) transformed distribution for reference and transfer distributions
-    +2 because we want to see the values of causal and anticausal models.
-    Evaluate the distance after intervention in transformed and non-trnasformed spaces.
-    """
-
-    if transformation == 'orthonormal':
-        transformers = scipy.stats.ortho_group.rvs(dim=2 * k, size=m)
-    else:  # tranformation=='small'
-        # small orthonormal deviations around the identity
-        noise = np.random.randn(2 * k, 2 * k)
-        antisymmetric = noise - noise.T
-        if noiserange is None:
-            noiserange = np.linspace(0.1, 1, m)
-        else:
-            m = len(noiserange)
-        transformers = [scipy.linalg.expm(eps * antisymmetric) for eps in noiserange]
-
-    ans = np.zeros([n, m + 2, 2])
-    for i in range(n):
-        # sample mechanisms
-        original = ConditionalGaussian.random(k, symmetric=True)
-        alloriginals = [original, original.reverse()] + [original.encode(t) for t in transformers]
-
-        if intervention == 'cause':
-            transfer = original.intervene_on_cause()
-        else:  # intervention on effect
-            transfer = original.intervene_on_effect()
-        alltransfers = [transfer, transfer.reverse()] + [transfer.encode(t) for t in transformers]
-
-        distances = [d.squared_distance(dt)
-                     for d, dt in zip(alloriginals, alltransfers)]
-
-        ans[i] = np.array(distances)
-
-    return ans
-
-
-transform_distances(3, 4, 5)
-transform_distances(3, 4, 5, transformation='small')
-transform_distances(3, 4, 5, intervention='effect', transformation='small')
