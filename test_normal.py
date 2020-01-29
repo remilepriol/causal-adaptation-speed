@@ -40,14 +40,24 @@ class TestNormals(unittest.TestCase):
         self.assertAlmostEqual(0, self.nat.reverse().reverse().distance(self.nat))
 
     # misc
-    def test_compile(self):
-        self.nat.to_mean().sample(5)
-        meanjoint = self.nat.to_joint().to_mean()
-        meanjoint.sample(5)
+    def test_interventions(self):
         self.nat.intervention(on='cause')
         self.nat.intervention(on='effect')
+
+    def test_meanjoint(self):
+        meanjoint = self.nat.to_joint().to_mean()
+        meanjoint.sample(5)
         encoder = scipy.stats.ortho_group.rvs(meanjoint.mean.shape[0])
         meanjoint.encode(encoder)
+
+    def test_meancond(self):
+        self.nat.to_mean().sample(5)
+
+    def test_natjoint(self):
+        natjoint = self.nat.to_joint()
+        natjoint.logpartition
+        natjoint.negativeloglikelihood(np.random.randn(10, natjoint.eta.shape[0]))
+
 
 
 if __name__ == '__main__':

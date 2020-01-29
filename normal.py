@@ -131,7 +131,7 @@ class NaturalJointNormal:
         """Return the NLL of each point in x.
         x is a n*2dim array where each row is a datapoint.
         """
-        linearterm = -self.x @ self.eta - np.sum((self.x @ self.precision) * self.x, axis=1)
+        linearterm = -x @ self.eta - np.sum((x @ self.precision) * x, axis=1)
         return linearterm + self.logpartition
 
 
