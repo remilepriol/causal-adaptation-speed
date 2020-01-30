@@ -237,7 +237,6 @@ class CholeskyConditionalNormal:
             + np.sum((self.linear - other.linear) ** 2)
             + np.sum((self.bias - other.bias) ** 2)
             + np.sum((self.lcond - other.lcond) ** 2)
-
         )
 
 
@@ -285,3 +284,10 @@ def sample_cholesky(dim):
     lowercond = sample_triangular(dim)
 
     return CholeskyConditionalNormal(zetaa, lowera, linear, bias, lowercond)
+
+
+def sample(dim, style):
+    if style == 'natural':
+        return sample_natural(dim)
+    elif style == 'cholesky':
+        return sample_cholesky(dim)
