@@ -175,10 +175,10 @@ class NaturalConditionalNormal:
         assert np.allclose(la @ la.T, self.preca)
         lcond = np.linalg.cholesky(self.preccond)
         return CholeskyConditionalNormal(
-            za=np.linalg.solve(la, self.etaa),
+            za=scipy.linalg.solve_triangular(la, self.etaa, lower=True),
             la=la,
-            linear=np.linalg.solve(lcond, self.linear),
-            bias=np.linalg.solve(lcond, self.bias),
+            linear=scipy.linalg.solve_triangular(lcond, self.linear, lower=True),
+            bias=scipy.linalg.solve_triangular(lcond, self.bias, lower=True),
             lcond=lcond
         )
 
