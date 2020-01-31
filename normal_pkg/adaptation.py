@@ -1,7 +1,9 @@
+import copy
 from collections import defaultdict
 
 import numpy as np
 import torch
+import tqdm
 from torch import nn, optim
 
 from averaging_manager import AveragedModel
@@ -18,13 +20,18 @@ def pamper(a):
     return b.to(torch.float32)
 
 
+def cholesky_numpy2module(cho, BtoA):
+    return CholeskyModule(cho.za, cho.la, cho.linear, cho.bias, cho.lcond, BtoA)
+
+
 class CholeskyModule(nn.Module):
 
     def __init__(self, za, la, linear, bias, lcond, BtoA=False):
         super().__init__()
+        dim = za.shape[0]
         self.za = nn.Parameter(pamper(za))
         self.la = nn.Parameter(pamper(la))
-        self.linear = nn.Linear()
+        self.linear = nn.Linear(dim, dim)
         self.linear.weight.data = pamper(linear)
         self.linear.bias.data = pamper(bias)
         self.lcond = pamper(lcond)
@@ -37,29 +44,33 @@ class CholeskyModule(nn.Module):
         batch_size = a.shape[0]
         if self.BtoA:
             a, b = b, a
-        marginal = .5 * torch.sum((a @ self.la - self.za) ** 2)
-        zcond = torch.linear(a)
-        conditional = .5 * torch.sum((b @ self.lcond - self.zcond) ** 2)
+        marginal = .5 * torch.sum((a @ self.la - self.za) ** 2) / batch_size
+        zcond = self.linear(a)
+        conditional = .5 * torch.sum((b @ self.lcond - zcond) ** 2) / batch_size
+
+        # for now do plain gradient descent !
+        marginal -= torch.sum(torch.log(torch.diag(self.la)))
+        conditional -= torch.sum(torch.log(torch.diag(self.lcond)))
 
         return marginal + conditional
 
     def kullback_leibler(self, other):
         """Complicated formula. Double check by going through the joint representation."""
         dim = self.za.shape[0]
-        va = torch.triangular_solve(other.la, self.la, upper=False)
+        va, _ = torch.trtrs(other.la, self.la, upper=False)
         marginal = .5 * torch.sum((va.t() @ self.za - other.za) ** 2)
         marginal += .5 * (torch.sum(va ** 2) - dim)
         marginal -= torch.sum(torch.log(torch.diag(va)))
 
-        vcond = torch.triangular_solve(other.lcond, self.lcond, upper=False)
+        vcond, _ = torch.trtrs(other.lcond, self.lcond, upper=False)
         conditional = .5 * (torch.sum(vcond ** 2) - dim)
         conditional -= torch.sum(torch.log(torch.diag(vcond)))
 
-        mua = torch.triangular_solve(self.za, self.la.t(), upper=True)
+        mua, _ = torch.trtrs(self.za, self.la.t(), upper=True)
         mat = vcond.t() @ self.linear.weight - other.linear.weight
         vec = vcond.t() @ self.linear.bias - other.linear.bias
         conditional += torch.sum((mat @ mua + vec) ** 2)
-        tmp = torch.triangular_solve(mat.t(), self.la)
+        tmp, _ = torch.trtrs(mat.t(), self.la)
         conditional += torch.sum(tmp ** 2)
 
         return marginal + conditional
@@ -70,8 +81,9 @@ class CholeskyModule(nn.Module):
 # note that's only for the cholesky matrices
 
 class AdaptationExperiment:
+    """Record adaptation speed."""
 
-    def __init__(self, k, n, T, intervention, init,
+    def __init__(self, k, n, intervention, init,
                  lr, batch_size=10, scheduler_exponent=0,  # optimizer
                  log_interval=10):
         self.k = k
@@ -81,88 +93,74 @@ class AdaptationExperiment:
         self.lr = lr
         self.batch_size = batch_size
         self.scheduler_exponent = scheduler_exponent
-        self.log_interval = 10
+        self.log_interval = log_interval
 
         reference = normal.sample(k, init)
-        self.sampler = reference.to_joint().to_mean()
+        self.sampler = reference.to_mean()
 
+        self.models = {
+            'causal': cholesky_numpy2module(reference.to_cholesky(), BtoA=False),
+            'anti': cholesky_numpy2module(reference.reverse().to_cholesky(), BtoA=True)
+        }
 
-def experiment_optimize(k, n, T, intervention, init,
-                        lr, batch_size=10, scheduler_exponent=0,  # optimizer
-                        log_interval=10):
-    """Record adaptation speed
+        self.targets = copy.deepcopy(self.models)
 
-    Sample n mechanisms of order k and for each of them sample an
-    intervention on the desired mechanism. Use SGD to update a causal
-    and an anticausal model for T steps. At each step, measure KL
-    and distance in scores for causal and anticausal directions.
-    """
-    causalstatic = 0
-    transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
-    causal = causalstatic.to_module()
-    transfer = transferstatic.to_module()
+        optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
+        self.optimizer = optim.ASGD(
+            [p for m in self.models.values() for p in m.parameters()], **optkwargs)
 
-    anticausal = causalstatic.reverse().to_module()
-    antitransfer = transferstatic.reverse().to_module()
+        self.trajectory = defaultdict(list)
+        self.step = 0
 
-    optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0,
-                 'weight_decay': 0}
-    causaloptimizer = optim.ASGD(causal.parameters(), **optkwargs)
-    antioptimizer = optim.ASGD(anticausal.parameters(), **optkwargs)
-    optimizers = [causaloptimizer, antioptimizer, jointoptimizer]
+    def evaluate(self):
+        self.trajectory['steps'].append(torch.tensor(self.step))
+        with torch.no_grad():
+            for name, model in self.models.items():
+                target = self.targets[name]
+                # SGD
+                self.trajectory[f'kl_{name}'].append(
+                    target.kullback_leibler(model))
+                # ASGD
+                with AveragedModel(model, self.optimizer):
+                    self.trajectory[f'kl_{name}_average'].append(
+                        target.kullback_leibler(model))
 
-    steps = []
-    ans = defaultdict(list)
-    for t in tqdm.tqdm(range(T)):
+    def iterate(self):
+        self.step += 1
+        self.optimizer.lr = self.lr / self.step ** self.scheduler_exponent
+        self.optimizer.zero_grad()
 
-        # EVALUATION
-        if t % log_interval == 0:
-            steps.append(t)
-
-            with torch.no_grad():
-
-                for model, optimizer, target, name in zip(
-                        [causal, anticausal, joint],
-                        optimizers,
-                        [transfer, antitransfer, jointtransfer],
-                        ['causal', 'anti', 'joint']
-                ):
-                    # SGD
-                    ans[f'kl_{name}'].append(target.kullback_leibler(model))
-                    ans[f'scoredist_{name}'].append(target.scoredist(model))
-
-                    # ASGD
-                    with AveragedModel(model, optimizer) as m:
-                        ans[f'kl_{name}_average'].append(
-                            target.kullback_leibler(m))
-                        ans[f'scoredist_{name}_average'].append(
-                            target.scoredist(m))
-        # UPDATE
-        for opt in optimizers:
-            opt.lr = lr / t ** scheduler_exponent
-            opt.zero_grad()
-
-        if batch_size == 'full':
-            causalloss = transfer.kullback_leibler(causal).sum()
-            antiloss = antitransfer.kullback_leibler(anticausal).sum()
+        if self.batch_size == 'full':
+            loss = sum([self.targets[name].kullback_leibler(model)
+                        for name, model in self.models.items()])
         else:
-            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
-            causalloss = - causal(aa, bb).sum() / batch_size
-            antiloss = - anticausal(aa, bb).sum() / batch_size
+            aa, bb = self.sampler.sample(self.batch_size)
+            loss = sum([model(pamper(aa), pamper(bb))
+                        for model in self.models.values()])
+        loss.backward()
+        self.optimizer.step()
 
-        for loss, opt in zip([causalloss, antiloss, jointloss], optimizers):
-            loss.backward()
-            opt.step()
+    def run(self, T):
+        for t in tqdm.tqdm(range(T)):
+            if t % self.log_interval == 0:
+                self.evaluate()
+            self.iterate()
 
-    for key, item in ans.items():
-        ans[key] = torch.stack(item).numpy()
+        for key, item in self.trajectory.items():
+            self.trajectory[key] = torch.stack(item).numpy()
 
-    return {'steps': np.array(steps), **ans}
+        return self.trajectory
 
 
-def test_experiment_optimize():
-    for intervention in ['cause', 'effect', 'gmechanism']:
-        experiment_optimize(
-            k=2, n=3, T=6, lr=.1, batch_size=4, log_interval=1,
-            intervention=intervention
-        )
+def test_AdaptationExperiment():
+    for intervention in ['cause', 'effect']:
+        for init in ['cholesky', 'natural']:
+            exp = AdaptationExperiment(
+                k=2, n=3, lr=.1, batch_size=4, log_interval=1,
+                intervention=intervention, init=init
+            )
+            exp.run(5)
+
+
+if __name__ == "__main__":
+    test_AdaptationExperiment()

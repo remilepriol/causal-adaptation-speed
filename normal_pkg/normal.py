@@ -290,4 +290,4 @@ def sample(dim, style):
     if style == 'natural':
         return sample_natural(dim)
     elif style == 'cholesky':
-        return sample_cholesky(dim)
+        return sample_cholesky(dim).to_natural()
