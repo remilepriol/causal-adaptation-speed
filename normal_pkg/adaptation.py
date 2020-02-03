@@ -77,7 +77,7 @@ class CholeskyModule(nn.Module):
         return marginal + conditional
 
     def dist(self, other):
-        return torch.sqrt(
+        return (
             torch.sum((self.za - other.za) ** 2)
             + torch.sum((self.la - other.la) ** 2)
             + torch.sum((self.linear.weight - other.linear.weight) ** 2)
@@ -140,7 +140,7 @@ class AdaptationExperiment:
                 with AveragedModel(model, self.optimizer):
                     self.trajectory[f'kl_{name}_average'].append(
                         target.kullback_leibler(model).item())
-                    self.trajectory[f'scoredist_{name}'].append(
+                    self.trajectory[f'scoredist_{name}_average'].append(
                         target.dist(model).item())
 
     def iterate(self):
@@ -184,7 +184,7 @@ def parameter_sweep(k, intervention, init, seed=17):
     print(f'intervention on {intervention} with k={k}')
     results = []
     base_experiment = {
-        'n': 20, 'k': k, 'T': 100, 'batch_size': 1,
+        'n': 20, 'k': k, 'T': 210, 'batch_size': 1,
         'intervention': intervention,
         'init': init,
     }

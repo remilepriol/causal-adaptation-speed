@@ -20,5 +20,6 @@ def learning_curves(results_dir='normal_results'):
                     two_plots(results, nsteps, plotname=plotname, dirname='normal')
                     allresults[intervention] = results
 
+
 if __name__ == "__main__":
     learning_curves()
