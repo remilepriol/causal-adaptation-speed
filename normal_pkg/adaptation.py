@@ -1,4 +1,5 @@
-import copy
+import os
+import pickle
 from collections import defaultdict
 
 import numpy as np
@@ -54,7 +55,7 @@ class CholeskyModule(nn.Module):
 
         return marginal + conditional
 
-    def kullback_leibler(self, other):
+    def kullback_leibler(self, other):  # TODO too slow
         """Complicated formula. Double check by going through the joint representation."""
         dim = self.za.shape[0]
         va, _ = torch.trtrs(other.la, self.la, upper=False)
@@ -75,19 +76,28 @@ class CholeskyModule(nn.Module):
 
         return marginal + conditional
 
+    def dist(self, other):
+        return torch.sqrt(
+            torch.sum((self.za - other.za) ** 2)
+            + torch.sum((self.la - other.la) ** 2)
+            + torch.sum((self.linear.weight - other.linear.weight) ** 2)
+            + torch.sum((self.linear.bias - other.linear.bias) ** 2)
+            + torch.sum((self.lcond - other.lcond) ** 2)
+        )
+
 
 # update use torch.tril
 # implement stochastic prox gradient optimizer ?
 # note that's only for the cholesky matrices
 
-class AdaptationExperiment:
-    """Record adaptation speed."""
 
-    def __init__(self, k, n, intervention, init,
+class AdaptationExperiment:
+    """Sample one distribution, adapt and record adaptation speed."""
+
+    def __init__(self, k, intervention, init,
                  lr, batch_size=10, scheduler_exponent=0,  # optimizer
                  log_interval=10):
         self.k = k
-        self.n = n
         self.intervention = intervention
         self.init = init
         self.lr = lr
@@ -96,14 +106,18 @@ class AdaptationExperiment:
         self.log_interval = log_interval
 
         reference = normal.sample(k, init)
-        self.sampler = reference.to_mean()
+        transfer = reference.intervention(on=intervention)
+        self.sampler = transfer.to_mean()
 
         self.models = {
             'causal': cholesky_numpy2module(reference.to_cholesky(), BtoA=False),
             'anti': cholesky_numpy2module(reference.reverse().to_cholesky(), BtoA=True)
         }
 
-        self.targets = copy.deepcopy(self.models)
+        self.targets = {
+            'causal': cholesky_numpy2module(transfer.to_cholesky(), BtoA=False),
+            'anti': cholesky_numpy2module(transfer.reverse().to_cholesky(), BtoA=True)
+        }
 
         optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
         self.optimizer = optim.ASGD(
@@ -113,17 +127,21 @@ class AdaptationExperiment:
         self.step = 0
 
     def evaluate(self):
-        self.trajectory['steps'].append(torch.tensor(self.step))
+        self.trajectory['steps'].append(self.step)
         with torch.no_grad():
             for name, model in self.models.items():
                 target = self.targets[name]
                 # SGD
                 self.trajectory[f'kl_{name}'].append(
-                    target.kullback_leibler(model))
+                    target.kullback_leibler(model).item())
+                self.trajectory[f'scoredist_{name}'].append(
+                    target.dist(model).item())
                 # ASGD
                 with AveragedModel(model, self.optimizer):
                     self.trajectory[f'kl_{name}_average'].append(
-                        target.kullback_leibler(model))
+                        target.kullback_leibler(model).item())
+                    self.trajectory[f'scoredist_{name}'].append(
+                        target.dist(model).item())
 
     def iterate(self):
         self.step += 1
@@ -141,26 +159,58 @@ class AdaptationExperiment:
         self.optimizer.step()
 
     def run(self, T):
-        for t in tqdm.tqdm(range(T)):
+        for t in range(T):
             if t % self.log_interval == 0:
                 self.evaluate()
             self.iterate()
 
-        for key, item in self.trajectory.items():
-            self.trajectory[key] = torch.stack(item).numpy()
 
-        return self.trajectory
+def batch_adaptation(n, T, **parameters):
+    trajectories = defaultdict(list)
+    for _ in tqdm.tqdm(range(n)):
+        exp = AdaptationExperiment(**parameters)
+        exp.run(T)
+        for key, item in exp.trajectory.items():
+            trajectories[key].append(item)
+
+    for key, item in trajectories.items():
+        trajectories[key] = np.array(item).T
+    trajectories['steps'] = trajectories['steps'][:, 0]
+
+    return trajectories
+
+
+def parameter_sweep(k, intervention, init, seed=17):
+    print(f'intervention on {intervention} with k={k}')
+    results = []
+    base_experiment = {
+        'n': 20, 'k': k, 'T': 100, 'batch_size': 1,
+        'intervention': intervention,
+        'init': init,
+    }
+    for lr in [.1, 1]:
+        np.random.seed(seed)
+        parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
+        trajectory = batch_adaptation(**parameters)
+        results.append({**parameters, **trajectory, 'guess': False})
+
+    savedir = 'normal_results'
+    os.makedirs(savedir, exist_ok=True)
+    savefile = f'{intervention}_{init}_k={k}.pkl'
+    savepath = os.path.join(savedir, savefile)
+    with open(savepath, 'wb') as fout:
+        pickle.dump(results, fout)
 
 
 def test_AdaptationExperiment():
     for intervention in ['cause', 'effect']:
-        for init in ['cholesky', 'natural']:
-            exp = AdaptationExperiment(
-                k=2, n=3, lr=.1, batch_size=4, log_interval=1,
-                intervention=intervention, init=init
-            )
-            exp.run(5)
+        for init in ['natural']:  # 'cholesky'
+            ans = batch_adaptation(T=100, k=3, n=20, lr=.1, batch_size=1, log_interval=20,
+                                   intervention=intervention, init=init)
 
 
 if __name__ == "__main__":
-    test_AdaptationExperiment()
+    # test_AdaptationExperiment()
+    k = 20
+    parameter_sweep(k, intervention='cause', init='natural')
+    parameter_sweep(k, intervention='effect', init='natural')
