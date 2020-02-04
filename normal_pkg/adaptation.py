@@ -9,6 +9,7 @@ from torch import nn, optim
 
 from averaging_manager import AveragedModel
 from normal_pkg import normal
+from normal_pkg.proximal_optimizer import PerturbedProximalGradient
 
 
 def pamper(a):
@@ -108,6 +109,12 @@ class CholeskyModule(nn.Module):
             f'\n \t lcond={self.lcond.data})'
         )
 
+    def standard_parameters(self):
+        return self.za, self.linear.weight, self.linear.bias
+
+    def triangular_parameters(self):
+        return self.la, self.lcond
+
 
 def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
     z0, L0 = p0.joint_parameters()
@@ -120,10 +127,6 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
     # return vecnorm, matnorm, logdet
     return vecnorm + matnorm - logdet
 
-
-# update use torch.tril
-# implement stochastic prox gradient optimizer ?
-# note that's only for the cholesky matrices
 
 class AdaptationExperiment:
     """Sample one distribution, adapt and record adaptation speed."""
@@ -158,7 +161,9 @@ class AdaptationExperiment:
 
         optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
         self.optimizer = optim.ASGD(
-            [p for m in self.models.values() for p in m.parameters()], **optkwargs)
+            [p for m in self.models.values() for p in m.standard_parameters()], **optkwargs)
+        self.proxopt = PerturbedProximalGradient(
+            [p for m in self.models.values() for p in m.triangular_parameters()], **optkwargs)
 
         self.trajectory = defaultdict(list)
         self.step = 0
@@ -174,7 +179,7 @@ class AdaptationExperiment:
                 self.trajectory[f'kl_{name}'].append(kl)
                 self.trajectory[f'scoredist_{name}'].append(dist)
                 # ASGD
-                with AveragedModel(model, self.optimizer):
+                with AveragedModel(model, self.optimizer), AveragedModel(model, self.proxopt):
                     kl = cholesky_kl(target, model).item()
                     dist = target.dist(model).item()
                     self.trajectory[f'kl_{name}_average'].append(kl)
@@ -182,8 +187,9 @@ class AdaptationExperiment:
 
     def iterate(self):
         self.step += 1
-        self.optimizer.lr = self.lr / self.step ** self.scheduler_exponent
-        self.optimizer.zero_grad()
+        for opt in [self.optimizer, self.proxopt]:
+            opt.lr = self.lr / self.step ** self.scheduler_exponent
+            opt.zero_grad()
 
         if self.batch_size == 0:
             loss = sum([self.targets[name].kullback_leibler(model)
@@ -194,13 +200,14 @@ class AdaptationExperiment:
             loss = sum([model(aa, bb) for model in self.models.values()])
         loss.backward()
         self.optimizer.step()
+        self.proxopt.step()
 
     def run(self, T):
         for t in range(T):
             if t % self.log_interval == 0:
                 self.evaluate()
             self.iterate()
-        print(self.__repr__())
+        # print(self.__repr__())
 
     def __repr__(self):
         return 'AdaptationExperiment\n' \
