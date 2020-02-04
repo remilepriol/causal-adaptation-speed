@@ -78,18 +78,17 @@ class CholeskyModule(nn.Module):
 
     def dist(self, other):
         return (
-            torch.sum((self.za - other.za) ** 2)
-            + torch.sum((self.la - other.la) ** 2)
-            + torch.sum((self.linear.weight - other.linear.weight) ** 2)
-            + torch.sum((self.linear.bias - other.linear.bias) ** 2)
-            + torch.sum((self.lcond - other.lcond) ** 2)
+                torch.sum((self.za - other.za) ** 2)
+                + torch.sum((self.la - other.la) ** 2)
+                + torch.sum((self.linear.weight - other.linear.weight) ** 2)
+                + torch.sum((self.linear.bias - other.linear.bias) ** 2)
+                + torch.sum((self.lcond - other.lcond) ** 2)
         )
 
 
 # update use torch.tril
 # implement stochastic prox gradient optimizer ?
 # note that's only for the cholesky matrices
-
 
 class AdaptationExperiment:
     """Sample one distribution, adapt and record adaptation speed."""
@@ -101,14 +100,17 @@ class AdaptationExperiment:
         self.intervention = intervention
         self.init = init
         self.lr = lr
-        self.batch_size = batch_size
+        self.batch_size = torch.tensor([batch_size])
         self.scheduler_exponent = scheduler_exponent
         self.log_interval = log_interval
 
         reference = normal.sample(k, init)
         transfer = reference.intervention(on=intervention)
-        self.sampler = transfer.to_mean()
 
+        meanjoint = reference.to_joint().to_mean()
+        self.sampler = torch.distributions.MultivariateNormal(
+            pamper(meanjoint.mean), covariance_matrix=pamper(meanjoint.cov)
+        )
         self.models = {
             'causal': cholesky_numpy2module(reference.to_cholesky(), BtoA=False),
             'anti': cholesky_numpy2module(reference.reverse().to_cholesky(), BtoA=True)
@@ -148,13 +150,13 @@ class AdaptationExperiment:
         self.optimizer.lr = self.lr / self.step ** self.scheduler_exponent
         self.optimizer.zero_grad()
 
-        if self.batch_size == 'full':
+        if self.batch_size == 0:
             loss = sum([self.targets[name].kullback_leibler(model)
                         for name, model in self.models.items()])
         else:
-            aa, bb = self.sampler.sample(self.batch_size)
-            loss = sum([model(pamper(aa), pamper(bb))
-                        for model in self.models.values()])
+            samples = self.sampler.sample(self.batch_size)
+            aa, bb = samples[:, :self.k], samples[:, self.k:]
+            loss = sum([model(aa, bb) for model in self.models.values()])
         loss.backward()
         self.optimizer.step()
 
