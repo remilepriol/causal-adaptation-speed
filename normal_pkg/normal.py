@@ -94,6 +94,11 @@ class NaturalJointNormal:
         cov = np.linalg.inv(self.precision)
         return MeanJointNormal(cov @ self.eta, cov)
 
+    def to_cholesky(self):
+        L = np.linalg.cholesky(self.precision)
+        zeta = scipy.linalg.solve_triangular(L, self.eta, lower=True)
+        return CholeskyJointNormal(zeta, L)
+
     def to_conditional(self):
         d = self.eta.shape[0] // 2
         # conditional parameters
@@ -131,6 +136,24 @@ class NaturalJointNormal:
             np.sum((self.eta - other.eta) ** 2)
             + np.sum((self.precision - other.precision) ** 2)
         )
+
+
+class CholeskyJointNormal:
+
+    def __init__(self, zeta, L):
+        self.zeta = zeta
+        self.L = L
+
+    def to_natural(self):
+        return NaturalJointNormal(
+            eta=self.L @ self.zeta,
+            precision=self.L @ self.L.T
+        )
+
+    def kullback_leibler(self, other):
+        V = scipy.linalg.solve_triangular(self.L, other.L).T
+        return (.5 * np.sum((V @ self.zeta - other.zeta) ** 2)
+                + .5 * np.sum(V ** 2) - np.sum(np.log(np.diag(V))))
 
 
 class NaturalConditionalNormal:
@@ -172,7 +195,6 @@ class NaturalConditionalNormal:
 
     def to_cholesky(self):
         la = np.linalg.cholesky(self.preca)
-        assert np.allclose(la @ la.T, self.preca)
         lcond = np.linalg.cholesky(self.preccond)
         return CholeskyConditionalNormal(
             za=scipy.linalg.solve_triangular(la, self.etaa, lower=True),

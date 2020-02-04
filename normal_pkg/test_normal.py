@@ -35,6 +35,10 @@ class TestNormals(unittest.TestCase):
     def test_cho2nat2cho(self):
         self.assertAlmostEqual(0, self.cho.to_natural().to_cholesky().distance(self.cho))
 
+    def test_nat2joint2cho2nat2cond(self):
+        self.assertAlmostEqual(0, self.nat.to_joint().to_cholesky().to_natural()
+                               .to_conditional().distance(self.nat))
+
     # change of direction
     def test_reversereverse(self):
         self.assertAlmostEqual(0, self.nat.reverse().reverse().distance(self.nat))
@@ -57,7 +61,6 @@ class TestNormals(unittest.TestCase):
         natjoint = self.nat.to_joint()
         natjoint.logpartition
         natjoint.negativeloglikelihood(np.random.randn(10, natjoint.eta.shape[0]))
-
 
 
 if __name__ == '__main__':
