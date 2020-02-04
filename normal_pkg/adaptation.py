@@ -55,26 +55,39 @@ class CholeskyModule(nn.Module):
 
         return marginal + conditional
 
-    def kullback_leibler(self, other):  # TODO too slow
+    def kullback_leibler(self, other):
         """Complicated formula. Double check by going through the joint representation."""
         dim = self.za.shape[0]
+        # marginal
         va, _ = torch.trtrs(other.la, self.la, upper=False)
-        marginal = .5 * torch.sum((va.t() @ self.za - other.za) ** 2)
-        marginal += .5 * (torch.sum(va ** 2) - dim)
-        marginal -= torch.sum(torch.log(torch.diag(va)))
+        vecnorm = .5 * torch.sum((va.t() @ self.za - other.za) ** 2)
+        matnorm = .5 * (torch.sum(va ** 2) - dim)
+        logdet = -torch.sum(torch.log(torch.diag(va)))
 
+        # conditional variance
         vcond, _ = torch.trtrs(other.lcond, self.lcond, upper=False)
-        conditional = .5 * (torch.sum(vcond ** 2) - dim)
-        conditional -= torch.sum(torch.log(torch.diag(vcond)))
+        matnorm += .5 * (torch.sum(vcond ** 2) - dim)
+        logdet += -torch.sum(torch.log(torch.diag(vcond)))
 
+        # linear relationship
         mua, _ = torch.trtrs(self.za, self.la.t(), upper=True)
-        mat = vcond.t() @ self.linear.weight - other.linear.weight
-        vec = vcond.t() @ self.linear.bias - other.linear.bias
-        conditional += torch.sum((mat @ mua + vec) ** 2)
-        tmp, _ = torch.trtrs(mat.t(), self.la)
-        conditional += torch.sum(tmp ** 2)
+        linear = vcond.t() @ self.linear.weight - other.linear.weight
+        bias = vcond.t() @ self.linear.bias - other.linear.bias
+        vecnorm += .5 * torch.sum((linear @ mua + bias) ** 2)
 
-        return marginal + conditional
+         tmp, _ = torch.trtrs(linear.t(), self.la, upper=False)
+        matnorm += .5 * torch.sum(tmp ** 2)
+        # return vecnorm, matnorm, logdet
+        return vecnorm + matnorm - logdet
+
+    def joint_parameters(self):
+        """Return joint cholesky, with order of X and Y inverted."""
+        zeta = torch.cat([self.linear.bias, self.za])
+        L = torch.cat([
+            torch.cat([self.lcond, torch.zeros_like(self.lcond)], 1),
+            torch.cat([- self.linear.weight.t(), self.la], 1)
+        ], 0)
+        return zeta, L
 
     def dist(self, other):
         return (
@@ -84,6 +97,18 @@ class CholeskyModule(nn.Module):
                 + torch.sum((self.linear.bias - other.linear.bias) ** 2)
                 + torch.sum((self.lcond - other.lcond) ** 2)
         )
+
+
+def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
+    z0, L0 = p0.joint_parameters()
+    z1, L1 = p1.joint_parameters()
+    V, _ = torch.trtrs(L1, L0, upper=False)
+    diff = V @ z0 - z1
+    vecnorm = .5 * torch.sum(diff ** 2)
+    matnorm = .5 * (torch.sum(V ** 2) - z0.shape[0])
+    logdet = - torch.sum(torch.log(torch.diag(V)))
+    # return vecnorm, matnorm, logdet
+    return vecnorm + matnorm - logdet
 
 
 # update use torch.tril
@@ -134,16 +159,16 @@ class AdaptationExperiment:
             for name, model in self.models.items():
                 target = self.targets[name]
                 # SGD
-                self.trajectory[f'kl_{name}'].append(
-                    target.kullback_leibler(model).item())
-                self.trajectory[f'scoredist_{name}'].append(
-                    target.dist(model).item())
+                kl = cholesky_kl(target, model).item()
+                dist = target.dist(model).item()
+                self.trajectory[f'kl_{name}'].append(kl)
+                self.trajectory[f'scoredist_{name}'].append(dist)
                 # ASGD
                 with AveragedModel(model, self.optimizer):
-                    self.trajectory[f'kl_{name}_average'].append(
-                        target.kullback_leibler(model).item())
-                    self.trajectory[f'scoredist_{name}_average'].append(
-                        target.dist(model).item())
+                    kl = cholesky_kl(target, model).item()
+                    dist = target.dist(model).item()
+                    self.trajectory[f'kl_{name}_average'].append(kl)
+                    self.trajectory[f'scoredist_{name}_average'].append(dist)
 
     def iterate(self):
         self.step += 1
