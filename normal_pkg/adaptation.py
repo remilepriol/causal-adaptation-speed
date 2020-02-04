@@ -35,7 +35,7 @@ class CholeskyModule(nn.Module):
         self.linear = nn.Linear(dim, dim)
         self.linear.weight.data = pamper(linear)
         self.linear.bias.data = pamper(bias)
-        self.lcond = pamper(lcond)
+        self.lcond = nn.Parameter(pamper(lcond))
         self.BtoA = BtoA
 
     def forward(self, a, b):
@@ -75,7 +75,7 @@ class CholeskyModule(nn.Module):
         bias = vcond.t() @ self.linear.bias - other.linear.bias
         vecnorm += .5 * torch.sum((linear @ mua + bias) ** 2)
 
-         tmp, _ = torch.trtrs(linear.t(), self.la, upper=False)
+        tmp, _ = torch.trtrs(linear.t(), self.la, upper=False)
         matnorm += .5 * torch.sum(tmp ** 2)
         # return vecnorm, matnorm, logdet
         return vecnorm + matnorm - logdet
@@ -96,6 +96,16 @@ class CholeskyModule(nn.Module):
                 + torch.sum((self.linear.weight - other.linear.weight) ** 2)
                 + torch.sum((self.linear.bias - other.linear.bias) ** 2)
                 + torch.sum((self.lcond - other.lcond) ** 2)
+        )
+
+    def __repr__(self):
+        return (
+            f'CholeskyModule('
+            f'\n \t za={self.za.data},'
+            f'\n \t la={self.la.data},'
+            f'\n \t linear={self.linear.weight.data},'
+            f'\n \t bias={self.linear.bias.data},'
+            f'\n \t lcond={self.lcond.data})'
         )
 
 
@@ -190,6 +200,11 @@ class AdaptationExperiment:
             if t % self.log_interval == 0:
                 self.evaluate()
             self.iterate()
+        print(self.__repr__())
+
+    def __repr__(self):
+        return 'AdaptationExperiment\n' \
+               + '\n'.join([f'{name} \t {model}' for name, model in self.models.items()])
 
 
 def batch_adaptation(n, T, **parameters):
@@ -230,14 +245,12 @@ def parameter_sweep(k, intervention, init, seed=17):
 
 
 def test_AdaptationExperiment():
-    for intervention in ['cause', 'effect']:
-        for init in ['natural']:  # 'cholesky'
-            ans = batch_adaptation(T=100, k=3, n=20, lr=.1, batch_size=1, log_interval=20,
-                                   intervention=intervention, init=init)
+    batch_adaptation(T=100, k=3, n=1, lr=.1, batch_size=1, log_interval=10,
+                     intervention='cause', init='natural')
 
 
 if __name__ == "__main__":
-    # test_AdaptationExperiment()
-    k = 20
-    parameter_sweep(k, intervention='cause', init='natural')
-    parameter_sweep(k, intervention='effect', init='natural')
+    test_AdaptationExperiment()
+    # k = 20
+    # parameter_sweep(k, intervention='cause', init='natural')
+    # parameter_sweep(k, intervention='effect', init='natural')
