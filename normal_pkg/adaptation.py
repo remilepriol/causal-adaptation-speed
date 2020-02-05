@@ -56,31 +56,6 @@ class CholeskyModule(nn.Module):
 
         return marginal + conditional
 
-    def kullback_leibler(self, other):
-        """Complicated formula. Double check by going through the joint representation."""
-        dim = self.za.shape[0]
-        # marginal
-        va, _ = torch.trtrs(other.la, self.la, upper=False)
-        vecnorm = .5 * torch.sum((va.t() @ self.za - other.za) ** 2)
-        matnorm = .5 * (torch.sum(va ** 2) - dim)
-        logdet = -torch.sum(torch.log(torch.diag(va)))
-
-        # conditional variance
-        vcond, _ = torch.trtrs(other.lcond, self.lcond, upper=False)
-        matnorm += .5 * (torch.sum(vcond ** 2) - dim)
-        logdet += -torch.sum(torch.log(torch.diag(vcond)))
-
-        # linear relationship
-        mua, _ = torch.trtrs(self.za, self.la.t(), upper=True)
-        linear = vcond.t() @ self.linear.weight - other.linear.weight
-        bias = vcond.t() @ self.linear.bias - other.linear.bias
-        vecnorm += .5 * torch.sum((linear @ mua + bias) ** 2)
-
-        tmp, _ = torch.trtrs(linear.t(), self.la, upper=False)
-        matnorm += .5 * torch.sum(tmp ** 2)
-        # return vecnorm, matnorm, logdet
-        return vecnorm + matnorm + logdet
-
     def joint_parameters(self):
         """Return joint cholesky, with order of X and Y inverted."""
         zeta = torch.cat([self.linear.bias, self.za])
@@ -233,7 +208,7 @@ def parameter_sweep(k, n, T, intervention, init, seed=17):
     print(f'intervention on {intervention} with k={k}')
     results = []
     base_experiment = {
-        'k': k, 'n': n, 'T': T, 'batch_size': 0,
+        'k': k, 'n': n, 'T': T, 'batch_size': 1,
         'intervention': intervention,
         'init': init,
     }
