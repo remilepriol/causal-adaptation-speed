@@ -79,7 +79,7 @@ class CholeskyModule(nn.Module):
         tmp, _ = torch.trtrs(linear.t(), self.la, upper=False)
         matnorm += .5 * torch.sum(tmp ** 2)
         # return vecnorm, matnorm, logdet
-        return vecnorm + matnorm - logdet
+        return vecnorm + matnorm + logdet
 
     def joint_parameters(self):
         """Return joint cholesky, with order of X and Y inverted."""
@@ -125,7 +125,7 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
     matnorm = .5 * (torch.sum(V ** 2) - z0.shape[0])
     logdet = - torch.sum(torch.log(torch.diag(V)))
     # return vecnorm, matnorm, logdet
-    return vecnorm + matnorm - logdet
+    return vecnorm + matnorm + logdet
 
 
 class AdaptationExperiment:
@@ -192,7 +192,7 @@ class AdaptationExperiment:
             opt.zero_grad()
 
         if self.batch_size == 0:
-            loss = sum([self.targets[name].kullback_leibler(model)
+            loss = sum([cholesky_kl(self.targets[name], model)
                         for name, model in self.models.items()])
         else:
             samples = self.sampler.sample(self.batch_size)
@@ -229,15 +229,15 @@ def batch_adaptation(n, T, **parameters):
     return trajectories
 
 
-def parameter_sweep(k, intervention, init, seed=17):
+def parameter_sweep(k, n, T, intervention, init, seed=17):
     print(f'intervention on {intervention} with k={k}')
     results = []
     base_experiment = {
-        'n': 20, 'k': k, 'T': 210, 'batch_size': 1,
+        'k': k, 'n': n, 'T': T, 'batch_size': 0,
         'intervention': intervention,
         'init': init,
     }
-    for lr in [.1, 1]:
+    for lr in [.0001, .001, .01, .1]:
         np.random.seed(seed)
         parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
         trajectory = batch_adaptation(**parameters)
@@ -257,7 +257,9 @@ def test_AdaptationExperiment():
 
 
 if __name__ == "__main__":
-    test_AdaptationExperiment()
-    # k = 20
-    # parameter_sweep(k, intervention='cause', init='natural')
-    # parameter_sweep(k, intervention='effect', init='natural')
+    # test_AdaptationExperiment()
+    k = 10
+    n = 10
+    T = 300
+    parameter_sweep(k, n, T, intervention='cause', init='natural')
+    parameter_sweep(k, n, T, intervention='effect', init='natural')
