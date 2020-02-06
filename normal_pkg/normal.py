@@ -174,12 +174,12 @@ class NaturalConditionalNormal:
         self.preccond = preccond
 
     def to_joint(self):
-        tmp = np.dot(self.linear.T, np.linalg.inv(self.preccond))
-        eta = np.concatenate([self.etaa - np.dot(tmp, self.bias), self.bias], axis=0)
+        tmp = np.linalg.solve(self.preccond, self.linear).T
+        eta = np.concatenate([self.etaa - tmp @ self.bias, self.bias], axis=0)
 
         d = self.etaa.shape[0]
         precision = np.zeros([2 * d, 2 * d])
-        precision[:d, :d] = self.preca + np.dot(tmp, self.linear)
+        precision[:d, :d] = self.preca + tmp @ self.linear
         precision[:d, d:] = - self.linear.T
         precision[d:, :d] = - self.linear
         precision[d:, d:] = self.preccond
@@ -208,7 +208,7 @@ class NaturalConditionalNormal:
         """Sample natural parameters of a marginal distribution
         and substitute them in the cause or effect marginals."""
         eta = np.random.randn(self.etaa.shape[0])
-        prec = wishart(self.etaa.shape[0]).rvs()
+        prec = wishart(self.etaa.shape[0])
         if on == 'cause':
             return NaturalConditionalNormal(eta, prec, self.linear, self.bias, self.preccond)
         elif on == 'effect':
@@ -268,22 +268,24 @@ class CholeskyConditionalNormal:
 # |  ___/ '__| |/ _ \| '__/ __|
 # | |   | |  | | (_) | |  \__ \
 # |_|   |_|  |_|\___/|_|  |___/
-def wishart(dim, addfreedom=100):
-    return scipy.stats.wishart(df=dim + addfreedom, scale=np.eye(dim))
+def wishart(dim, addfreedom=1):
+    ans = scipy.stats.wishart(df=dim + addfreedom, scale=np.eye(dim)).rvs()
+    if dim == 1:
+        ans = np.array([[ans]])
+    return ans
 
 
 def sample_natural(dim):
     """Sample natural parameters of a ConditionalGaussian of dimension dim."""
-    precision_distribution = wishart(dim)
 
     # parameters of marginal on A
     etaa = np.random.randn(dim)
-    preca = precision_distribution.rvs()
+    preca = wishart(dim)
 
     # parameters of conditional
     linear = np.random.randn(dim, dim)
     bias = np.random.randn(dim)
-    preccond = precision_distribution.rvs()
+    preccond = wishart(dim)
 
     return NaturalConditionalNormal(etaa, preca, linear, bias, preccond)
 
