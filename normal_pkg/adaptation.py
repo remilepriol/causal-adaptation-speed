@@ -129,14 +129,13 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, nograd_
 class AdaptationExperiment:
     """Sample one distribution, adapt and record adaptation speed."""
 
-    def __init__(self, k, intervention, init,
+    def __init__(self, k, T, intervention, init,
                  lr, batch_size=10, scheduler_exponent=0, use_prox=False,  # optimizer
                  log_interval=10):
         self.k = k
         self.intervention = intervention
         self.init = init
         self.lr = lr
-        self.batch_size = torch.tensor([batch_size])
         self.scheduler_exponent = scheduler_exponent
         self.log_interval = log_interval
         self.use_prox = use_prox
@@ -144,10 +143,15 @@ class AdaptationExperiment:
         reference = normal.sample(k, init)
         transfer = reference.intervention(on=intervention)
 
-        meanjoint = transfer.to_joint().to_mean()
-        self.sampler = torch.distributions.MultivariateNormal(
-            pamper(meanjoint.mean), covariance_matrix=pamper(meanjoint.cov)
-        )
+        self.deterministic = True if batch_size == 0 else False
+        if not self.deterministic:
+            meanjoint = transfer.to_joint().to_mean()
+            sampler = torch.distributions.MultivariateNormal(
+                pamper(meanjoint.mean), covariance_matrix=pamper(meanjoint.cov)
+            )
+            data_size = torch.tensor([T, batch_size])
+            self.dataset = sampler.sample(data_size)
+
         self.models = {
             'causal': cholesky_numpy2module(reference.to_cholesky(), BtoA=False),
             'anti': cholesky_numpy2module(reference.reverse().to_cholesky(), BtoA=True)
@@ -187,11 +191,11 @@ class AdaptationExperiment:
         self.optimizer.lr = self.lr / self.step ** self.scheduler_exponent
         self.optimizer.zero_grad()
 
-        if self.batch_size == 0:
+        if self.deterministic:
             loss = sum([cholesky_kl(self.targets[name], model, nograd_logdet=self.use_prox)
                         for name, model in self.models.items()])
         else:
-            samples = self.sampler.sample(self.batch_size)
+            samples = self.dataset[self.step - 1]
             aa, bb = samples[:, :self.k], samples[:, self.k:]
             loss = sum(
                 [model(aa, bb, nograd_logdet=self.use_prox) for model in self.models.values()])
@@ -215,7 +219,7 @@ def batch_adaptation(n, T, **parameters):
     trajectories = defaultdict(list)
     models = []
     for _ in tqdm.tqdm(range(n)):
-        exp = AdaptationExperiment(**parameters)
+        exp = AdaptationExperiment(T=T, **parameters)
         exp.run(T)
         for key, item in exp.trajectory.items():
             trajectories[key].append(item)
@@ -259,10 +263,10 @@ def test_AdaptationExperiment():
 
 if __name__ == "__main__":
     # test_AdaptationExperiment()
-    k = 1
     n = 10
-    T = 300
-    bs = 100
+    T = 400
+    bs = 1
     prox = True
-    parameter_sweep(k, n, T, bs, prox, intervention='cause', init='natural')
-    # parameter_sweep(k, n, T, bs, prox, intervention='effect', init='natural')
+    for k in [20, 30]:
+        parameter_sweep(k, n, T, bs, prox, intervention='cause', init='natural')
+        parameter_sweep(k, n, T, bs, prox, intervention='effect', init='natural')
