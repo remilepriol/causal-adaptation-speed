@@ -144,7 +144,7 @@ class AdaptationExperiment:
         reference = normal.sample(k, init)
         transfer = reference.intervention(on=intervention)
 
-        meanjoint = reference.to_joint().to_mean()
+        meanjoint = transfer.to_joint().to_mean()
         self.sampler = torch.distributions.MultivariateNormal(
             pamper(meanjoint.mean), covariance_matrix=pamper(meanjoint.cov)
         )
@@ -228,14 +228,15 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=17):
-    print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
+def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=1):
+    # print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
     results = []
     base_experiment = {
         'k': k, 'n': n, 'T': T, 'batch_size': bs, 'use_prox': prox,
         'intervention': intervention,
         'init': init,
     }
+    print(base_experiment)
     for lr in [.0001, .001, .01, .1]:
         np.random.seed(seed)
         torch.manual_seed(seed)
