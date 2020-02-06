@@ -6,8 +6,11 @@ from torch import optim
 
 class PerturbedProximalGradient(optim.ASGD):
 
-    def __init__(self, params, **kwargs):
+    def __init__(self, params, use_prox, **kwargs):
         super(PerturbedProximalGradient, self).__init__(params, **kwargs)
+        self.use_prox = use_prox
+        # note that even if I do not use prox,
+        # I still need to project on lower triangular matrix
 
     def step(self):
         """Mostly copied from ASGD, but there was no other way to do both
@@ -41,13 +44,17 @@ class PerturbedProximalGradient(optim.ASGD):
                 p.data.add_(-state['eta'], grad)
 
                 # NEW
-                istriangular = getattr(p,'triangular', False)
+                istriangular = getattr(p, 'triangular', False)
                 if istriangular:
                     # project back onto lower triangular matrices
                     p.data = torch.tril(p.data)
+
                     # proximal update on diagonal parameters with - log loss
                     di = torch.diag(p.data)
-                    diff = .5 * (torch.sqrt(di ** 2 + 4 * state['eta']) - di)
+                    if self.use_prox:
+                        diff = .5 * (torch.sqrt(di ** 2 + 4 * state['eta']) - di)
+                    else:
+                        diff = torch.clamp(di, min=1e-3) - di
                     p.data.add_(torch.diag(diff))
                 # END NEW
 

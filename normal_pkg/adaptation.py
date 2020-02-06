@@ -5,7 +5,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 import tqdm
-from torch import nn, optim
+from torch import nn
 
 from averaging_manager import AveragedModel
 from normal_pkg import normal
@@ -42,7 +42,7 @@ class CholeskyModule(nn.Module):
         self.la.triangular = True
         self.lcond.triangular = True
 
-    def forward(self, a, b, test_via_joint=False, loggrad=False):
+    def forward(self, a, b, test_via_joint=False, nograd_logdet=False):
         """Compute only the quadratic part of the loss to get its gradient.
         I will use a proximal operator to optimize the log-partition logdet-barrier.
         """
@@ -57,7 +57,7 @@ class CholeskyModule(nn.Module):
 
         logdet = - torch.sum(torch.log(torch.diag(self.la)))
         logdet += - torch.sum(torch.log(torch.diag(self.lcond)))
-        if loggrad:
+        if nograd_logdet:
             logdet.detach_()
 
         loss1 = marginal + conditional + logdet
@@ -69,9 +69,8 @@ class CholeskyModule(nn.Module):
             x = torch.cat([b, a], 1)
             z, L = self.joint_parameters()
             quadratic = .5 * torch.sum((x @ L - z) ** 2) / batch_size
-            with torch.no_grad():
-                loggrad = - torch.sum(torch.log(torch.diag(L)))
-            loss2 = quadratic + loggrad
+            logdet = - torch.sum(torch.log(torch.diag(L)))
+            loss2 = quadratic + logdet
 
             assert torch.isclose(loss1, loss2), (loss1, loss2)
 
@@ -105,14 +104,8 @@ class CholeskyModule(nn.Module):
             f'\n \t lcond={self.lcond.data})'
         )
 
-    def standard_parameters(self):
-        return self.za, self.linear.weight, self.linear.bias
 
-    def triangular_parameters(self):
-        return self.la, self.lcond
-
-
-def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, loggrad=False):
+def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, nograd_logdet=False):
     z0, L0 = p0.joint_parameters()
     z1, L1 = p1.joint_parameters()
     V, _ = torch.trtrs(L1, L0, upper=False)
@@ -120,7 +113,7 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, loggrad
     vecnorm = .5 * torch.sum(diff ** 2)
     matnorm = .5 * (torch.sum(V ** 2) - z0.shape[0])
     logdet = - torch.sum(torch.log(torch.diag(V)))
-    if not loggrad:
+    if nograd_logdet:
         logdet.detach_()
 
     matdivergence = matnorm + logdet
@@ -137,7 +130,7 @@ class AdaptationExperiment:
     """Sample one distribution, adapt and record adaptation speed."""
 
     def __init__(self, k, intervention, init,
-                 lr, batch_size=10, scheduler_exponent=0,  # optimizer
+                 lr, batch_size=10, scheduler_exponent=0, use_prox=False,  # optimizer
                  log_interval=10):
         self.k = k
         self.intervention = intervention
@@ -146,6 +139,7 @@ class AdaptationExperiment:
         self.batch_size = torch.tensor([batch_size])
         self.scheduler_exponent = scheduler_exponent
         self.log_interval = log_interval
+        self.use_prox = use_prox
 
         reference = normal.sample(k, init)
         transfer = reference.intervention(on=intervention)
@@ -166,7 +160,7 @@ class AdaptationExperiment:
 
         optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
         self.optimizer = PerturbedProximalGradient(
-            [p for m in self.models.values() for p in m.parameters()], **optkwargs)
+            [p for m in self.models.values() for p in m.parameters()], self.use_prox, **optkwargs)
 
         self.trajectory = defaultdict(list)
         self.step = 0
@@ -194,12 +188,13 @@ class AdaptationExperiment:
         self.optimizer.zero_grad()
 
         if self.batch_size == 0:
-            loss = sum([cholesky_kl(self.targets[name], model)
+            loss = sum([cholesky_kl(self.targets[name], model, nograd_logdet=self.use_prox)
                         for name, model in self.models.items()])
         else:
             samples = self.sampler.sample(self.batch_size)
             aa, bb = samples[:, :self.k], samples[:, self.k:]
-            loss = sum([model(aa, bb) for model in self.models.values()])
+            loss = sum(
+                [model(aa, bb, nograd_logdet=self.use_prox) for model in self.models.values()])
         loss.backward()
         self.optimizer.step()
         self.trajectory['loss'].append(loss.item())
@@ -233,11 +228,11 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def parameter_sweep(k, n, T, bs, intervention, init, seed=17):
+def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=17):
     print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
     results = []
     base_experiment = {
-        'k': k, 'n': n, 'T': T, 'batch_size': bs,
+        'k': k, 'n': n, 'T': T, 'batch_size': bs, 'use_prox': prox,
         'intervention': intervention,
         'init': init,
     }
@@ -267,5 +262,6 @@ if __name__ == "__main__":
     n = 10
     T = 300
     bs = 100
-    parameter_sweep(k, n, T, bs, intervention='cause', init='natural')
-    # parameter_sweep(k, n, T, bs, intervention='effect', init='natural')
+    prox = True
+    parameter_sweep(k, n, T, bs, prox, intervention='cause', init='natural')
+    # parameter_sweep(k, n, T, bs, prox, intervention='effect', init='natural')
