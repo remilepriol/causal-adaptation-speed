@@ -41,13 +41,14 @@ class PerturbedProximalGradient(optim.ASGD):
                 p.data.add_(-state['eta'], grad)
 
                 # NEW
-                # project back onto lower triangular matrices
-                p.data = torch.tril(p.data)
-                # proximal update on diagonal parameters with - log loss
-                olddiag = torch.diag(p.data)
-                newdiag = .5 * (olddiag + torch.sqrt(olddiag ** 2 + state['eta']))
-                mask = torch.eye(olddiag.shape[0])
-                p.data = (1 - mask) * p.data + torch.diag(newdiag)
+                istriangular = getattr(p,'triangular', False)
+                if istriangular:
+                    # project back onto lower triangular matrices
+                    p.data = torch.tril(p.data)
+                    # proximal update on diagonal parameters with - log loss
+                    di = torch.diag(p.data)
+                    diff = .5 * (torch.sqrt(di ** 2 + 4 * state['eta']) - di)
+                    p.data.add_(torch.diag(diff))
                 # END NEW
 
                 # averaging

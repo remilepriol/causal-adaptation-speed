@@ -33,28 +33,49 @@ class CholeskyModule(nn.Module):
         dim = za.shape[0]
         self.za = nn.Parameter(pamper(za))
         self.la = nn.Parameter(pamper(la))
-        self.linear = nn.Linear(dim, dim)
+        self.linear = nn.Linear(dim, dim, bias=True)
         self.linear.weight.data = pamper(linear)
         self.linear.bias.data = pamper(bias)
         self.lcond = nn.Parameter(pamper(lcond))
         self.BtoA = BtoA
 
-    def forward(self, a, b):
+        self.la.triangular = True
+        self.lcond.triangular = True
+
+    def forward(self, a, b, test_via_joint=False, loggrad=False):
         """Compute only the quadratic part of the loss to get its gradient.
         I will use a proximal operator to optimize the log-partition logdet-barrier.
         """
         batch_size = a.shape[0]
         if self.BtoA:
             a, b = b, a
+
+        # use conditional parametrization
         marginal = .5 * torch.sum((a @ self.la - self.za) ** 2) / batch_size
         zcond = self.linear(a)
         conditional = .5 * torch.sum((b @ self.lcond - zcond) ** 2) / batch_size
 
-        # for now do plain gradient descent !
-        marginal -= torch.sum(torch.log(torch.diag(self.la)))
-        conditional -= torch.sum(torch.log(torch.diag(self.lcond)))
+        logdet = - torch.sum(torch.log(torch.diag(self.la)))
+        logdet += - torch.sum(torch.log(torch.diag(self.lcond)))
+        if loggrad:
+            logdet.detach_()
 
-        return marginal + conditional
+        loss1 = marginal + conditional + logdet
+
+        # use joint parametrization
+        # CAREFUL the joint parametrization inverts the roles
+        # of cause and effect for simplicity
+        if test_via_joint:
+            x = torch.cat([b, a], 1)
+            z, L = self.joint_parameters()
+            quadratic = .5 * torch.sum((x @ L - z) ** 2) / batch_size
+            with torch.no_grad():
+                loggrad = - torch.sum(torch.log(torch.diag(L)))
+            loss2 = quadratic + loggrad
+
+            assert torch.isclose(loss1, loss2), (loss1, loss2)
+
+        return loss1
 
     def joint_parameters(self):
         """Return joint cholesky, with order of X and Y inverted."""
@@ -91,7 +112,7 @@ class CholeskyModule(nn.Module):
         return self.la, self.lcond
 
 
-def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
+def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, loggrad=False):
     z0, L0 = p0.joint_parameters()
     z1, L1 = p1.joint_parameters()
     V, _ = torch.trtrs(L1, L0, upper=False)
@@ -99,8 +120,17 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule):
     vecnorm = .5 * torch.sum(diff ** 2)
     matnorm = .5 * (torch.sum(V ** 2) - z0.shape[0])
     logdet = - torch.sum(torch.log(torch.diag(V)))
-    # return vecnorm, matnorm, logdet
-    return vecnorm + matnorm + logdet
+    if not loggrad:
+        logdet.detach_()
+
+    matdivergence = matnorm + logdet
+    total = vecnorm + matdivergence
+    if decompose:
+        return {'vector': vecnorm.item(), 'matrix': matdivergence.item(),
+                'total': total.item(), 'v/t': vecnorm.item() / total.item(),
+                'm/t': matdivergence.item() / total.item()}
+    else:
+        return total
 
 
 class AdaptationExperiment:
@@ -135,10 +165,8 @@ class AdaptationExperiment:
         }
 
         optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0, 'weight_decay': 0}
-        self.optimizer = optim.ASGD(
-            [p for m in self.models.values() for p in m.standard_parameters()], **optkwargs)
-        self.proxopt = PerturbedProximalGradient(
-            [p for m in self.models.values() for p in m.triangular_parameters()], **optkwargs)
+        self.optimizer = PerturbedProximalGradient(
+            [p for m in self.models.values() for p in m.parameters()], **optkwargs)
 
         self.trajectory = defaultdict(list)
         self.step = 0
@@ -154,7 +182,7 @@ class AdaptationExperiment:
                 self.trajectory[f'kl_{name}'].append(kl)
                 self.trajectory[f'scoredist_{name}'].append(dist)
                 # ASGD
-                with AveragedModel(model, self.optimizer), AveragedModel(model, self.proxopt):
+                with AveragedModel(model, self.optimizer):
                     kl = cholesky_kl(target, model).item()
                     dist = target.dist(model).item()
                     self.trajectory[f'kl_{name}_average'].append(kl)
@@ -162,9 +190,8 @@ class AdaptationExperiment:
 
     def iterate(self):
         self.step += 1
-        for opt in [self.optimizer, self.proxopt]:
-            opt.lr = self.lr / self.step ** self.scheduler_exponent
-            opt.zero_grad()
+        self.optimizer.lr = self.lr / self.step ** self.scheduler_exponent
+        self.optimizer.zero_grad()
 
         if self.batch_size == 0:
             loss = sum([cholesky_kl(self.targets[name], model)
@@ -175,7 +202,7 @@ class AdaptationExperiment:
             loss = sum([model(aa, bb) for model in self.models.values()])
         loss.backward()
         self.optimizer.step()
-        self.proxopt.step()
+        self.trajectory['loss'].append(loss.item())
 
     def run(self, T):
         for t in range(T):
@@ -185,38 +212,41 @@ class AdaptationExperiment:
         # print(self.__repr__())
 
     def __repr__(self):
-        return 'AdaptationExperiment\n' \
+        return f'AdaptationExperiment step={self.step} \n' \
                + '\n'.join([f'{name} \t {model}' for name, model in self.models.items()])
 
 
 def batch_adaptation(n, T, **parameters):
     trajectories = defaultdict(list)
+    models = []
     for _ in tqdm.tqdm(range(n)):
         exp = AdaptationExperiment(**parameters)
         exp.run(T)
         for key, item in exp.trajectory.items():
             trajectories[key].append(item)
+        models += [(exp.models, exp.targets)]
 
     for key, item in trajectories.items():
         trajectories[key] = np.array(item).T
     trajectories['steps'] = trajectories['steps'][:, 0]
 
-    return trajectories
+    return trajectories, models
 
 
-def parameter_sweep(k, n, T, intervention, init, seed=17):
-    print(f'intervention on {intervention} with k={k}')
+def parameter_sweep(k, n, T, bs, intervention, init, seed=17):
+    print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
     results = []
     base_experiment = {
-        'k': k, 'n': n, 'T': T, 'batch_size': 1,
+        'k': k, 'n': n, 'T': T, 'batch_size': bs,
         'intervention': intervention,
         'init': init,
     }
     for lr in [.0001, .001, .01, .1]:
         np.random.seed(seed)
+        torch.manual_seed(seed)
         parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
-        trajectory = batch_adaptation(**parameters)
-        results.append({**parameters, **trajectory, 'guess': False})
+        trajectory, models = batch_adaptation(**parameters)
+        results.append({**parameters, **trajectory, 'models': models, 'guess': False})
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
@@ -233,8 +263,9 @@ def test_AdaptationExperiment():
 
 if __name__ == "__main__":
     # test_AdaptationExperiment()
-    k = 10
+    k = 1
     n = 10
     T = 300
-    parameter_sweep(k, n, T, intervention='cause', init='natural')
-    parameter_sweep(k, n, T, intervention='effect', init='natural')
+    bs = 100
+    parameter_sweep(k, n, T, bs, intervention='cause', init='natural')
+    # parameter_sweep(k, n, T, bs, intervention='effect', init='natural')
