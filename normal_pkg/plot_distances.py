@@ -20,12 +20,11 @@ def all_distances():
     os.makedirs(plotdir, exist_ok=True)
 
     for exp in results:
-        if exp['dim']==20:
-            name = "{intervention}_init={init}_k={dim}.pdf".format(**exp)
-            print(name)
-            scatter_distances(exp)
-            plt.savefig(os.path.join(plotdir, name))
-            plt.close()
+        name = "{intervention}_init={init}_k={dim}.pdf".format(**exp)
+        print(name)
+        scatter_distances(exp)
+        plt.savefig(os.path.join(plotdir, name))
+        plt.close()
 
 
 def scatter_distances(exp, alpha=.5):
@@ -44,8 +43,9 @@ def scatter_distances(exp, alpha=.5):
         ax.legend()
         ax.grid()
         ax.set_xlabel('causal distance')
-        ax.set_xlabel('anti distance')
+        ax.set_ylabel('anti distance')
         abline(ax, 1, 0)
+        ax.axis('equal')
             
     return fig
 

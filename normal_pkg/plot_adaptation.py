@@ -3,12 +3,13 @@ import pickle
 from collections import defaultdict
 
 from categorical.sweep import two_plots
+from normal_pkg.adaptation import CholeskyModule
 
 
 def learning_curves(results_dir='normal_results'):
-    for k in [20]:
+    for k in [3, 4, 10]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
-        nsteps = k ** 2 // 4
+        nsteps = 100
         allresults = defaultdict(list)
         init = 'natural'
         for intervention in ['cause', 'effect']:
