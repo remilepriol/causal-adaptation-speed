@@ -320,10 +320,10 @@ def sample_cholesky(dim):
     return CholeskyConditionalNormal(zetaa, lowera, linear, bias, lowercond)
 
 
-def sample(dim, mode):
+def sample(dim, mode, **kwargs):
     if mode == 'natural':
-        return sample_natural(dim, mode='conjugate')
+        return sample_natural(dim, mode='conjugate', **kwargs)
     elif mode == 'naive':
-        return sample_natural(dim, mode=mode)
+        return sample_natural(dim, mode=mode, **kwargs)
     elif mode == 'cholesky':
         return sample_cholesky(dim).to_natural()

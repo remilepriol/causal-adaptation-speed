@@ -131,7 +131,7 @@ class AdaptationExperiment:
 
     def __init__(self, k, T, intervention, init,
                  lr, batch_size=10, scheduler_exponent=0, use_prox=False,  # optimizer
-                 log_interval=10):
+                 preccond_scale=10, log_interval=10):
         self.k = k
         self.intervention = intervention
         self.init = init
@@ -140,7 +140,7 @@ class AdaptationExperiment:
         self.log_interval = log_interval
         self.use_prox = use_prox
 
-        reference = normal.sample(k, init)
+        reference = normal.sample(k, init, scale=preccond_scale)
         transfer = reference.intervention(on=intervention)
 
         self.deterministic = True if batch_size == 0 else False
@@ -232,14 +232,18 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=1):
+def parameter_sweep(k, n, T, bs, prox, intervention, init,
+                    preccond_scale, seed=1):
     # print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
     results = []
     base_experiment = {
         'k': k, 'n': n, 'T': T, 'batch_size': bs, 'use_prox': prox,
         'intervention': intervention,
-        'init': init,
+        'init': init, 'preccond_scale': preccond_scale,
+        'intervention_scale': 1  # between 0 and 1.
+        # Interpolates reference and transfer marginal or mechanism
     }
+
     print(base_experiment)
     for lr in [.0001, .001, .01, .1]:
         np.random.seed(seed)
@@ -254,7 +258,7 @@ def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=1):
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
-    savefile = f'{intervention}_{init}_k={k}.pkl'
+    savefile = f'{intervention}_{init}_k={k}_{preccond_scale}.pkl'
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
         pickle.dump(results, fout)
@@ -271,6 +275,11 @@ if __name__ == "__main__":
     T = 400
     bs = 1
     prox = True
+    preccond_scale = 10
     for k in [20, 30]:
-        parameter_sweep(k, n, T, bs, prox, intervention='cause', init='natural')
-        parameter_sweep(k, n, T, bs, prox, intervention='effect', init='natural')
+        parameter_sweep(k, n, T, bs, prox,
+                        intervention='cause', init='natural',
+                        preccond_scale=preccond_scale)
+        parameter_sweep(k, n, T, bs, prox,
+                        intervention='effect', init='natural',
+                        preccond_scale=preccond_scale)
