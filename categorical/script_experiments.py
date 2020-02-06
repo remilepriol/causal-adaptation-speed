@@ -83,7 +83,11 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False):
                 trajectory = distances1.experiment_guess(**parameters)
             else:
                 trajectory = distances1.experiment_optimize(**parameters)
-            results.append({**parameters, **trajectory, 'guess': guess})
+            results.append({
+                'hyperparameters': parameters,
+                'trajectory': trajectory,
+                'guess': guess
+            })
 
     savedir = 'results'
     os.makedirs(savedir, exist_ok=True)
@@ -107,7 +111,7 @@ if __name__ == "__main__":
     # optimize_distances()
     guess = False
     for init_dense in [True]:
-        for k in [10, 20, 50]:
+        for k in [10, 20]:
             parameter_sweep('cause', k, init_dense, guess=guess)
             parameter_sweep('effect', k, init_dense, guess=guess)
             # parameter_sweep('gmechanism', k, init_dense)

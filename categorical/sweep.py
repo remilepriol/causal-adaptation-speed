@@ -42,37 +42,43 @@ def value_at_step(trajectory, nsteps=1000):
 
 
 def get_best(results, nsteps):
-    # idea : store per model each parameter and kl values
-    # then for each model return the argmax parameters and curves
-    # for kl and integral kl
+    """Store per model each parameter and kl values
+    then for each model return the argmax parameters and curves
+    for kl and integral kl
+    """
 
     by_model = {}
+    # dictionary where each key is a model,
+    # and each value is a list of this model's hyperparameter
+    # and outcome at step nsteps
     for exp in results:
         relevant_parameters = {
-            key: exp[key] for key in exp
-            if key in ['k', 'lr', 'n0', 'scheduler_exponent', 'steps']}
+            key: item for key, item in exp['hyperparameters'].items()
+            if key in ['k', 'lr', 'n0', 'scheduler_exponent']}
 
-        for model, metric in value_at_step(exp, nsteps).items():
+        trajectory = exp['trajectory']
+        for model, metric in value_at_step(trajectory, nsteps).items():
             if model not in by_model:
                 by_model[model] = []
             toadd = {**relevant_parameters,
                      'value': metric,
-                     'kl': exp['kl_' + model]
+                     'kl': trajectory['kl_' + model],
+                     'steps': trajectory['steps']
                      }
-            if 'scoredist_' + model in exp:
-                toadd['scoredist'] = exp['scoredist_' + model]
+            if 'scoredist_' + model in trajectory:
+                toadd['scoredist'] = trajectory['scoredist_' + model]
             by_model[model] += [toadd]
 
+    # select only the best hyperparameters for this model.
     for model, metrics in by_model.items():
         by_model[model] = sorted(metrics, key=lambda x: x['value'])[0]
 
+    # print the outcome
     for model, item in by_model.items():
         if 'MAP' in model:
             print(model, ('\t n0={n0:.0f},'
                           '\t kl={value:.3f}').format(**item))
-
-    for model, item in by_model.items():
-        if 'MAP' not in model:
+        else:
             print(model, ('\t alpha={scheduler_exponent},'
                           '\t lr={lr:.1e},'
                           '\t kl={value:.3f}').format(**item))
@@ -120,7 +126,7 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     for model, item in sorted(bestof.items()):
         if 'scoredist' not in item:
             continue
-        index = min(np.searchsorted(item['steps'], nsteps), len(item['steps'])-1)
+        index = min(np.searchsorted(item['steps'], nsteps), len(item['steps']) - 1)
 
         initial_distances = item['scoredist'][0]
         end_kl = item['kl'][index]
@@ -153,8 +159,10 @@ def two_plots(results, nsteps, plotname, dirname):
     bestof = get_best(results, nsteps)
     # remove the models I don't want to compare
     # eg remove SGD, MAP. Keep ASGD and rename them to remove average.
-    selected = {key[0].capitalize() + key[1:-len('_average')].replace('A', 'X').replace('B','Y'): item for key, item in bestof.items()
-                if key.endswith('_average')}
+    selected = {
+        key[0].capitalize() + key[1:-len('_average')].replace('A', 'X').replace('B', 'Y'): item for
+        key, item in bestof.items()
+        if key.endswith('_average')}
     if dirname.startswith('guess'):
         selected.pop('Joint', None)
 
@@ -208,6 +216,35 @@ def plot_marginal_likelihoods(results, intervention, k, dirname):
     plt.close()
 
 
+def merge_results(results1, results2, bs=5):
+    """Combine results from intervention on cause and effect.
+    Also report statistics about pooled results.
+
+    Pooled records the average over 10 cause and 10 effect interventions
+    the goal is to have tighter percentile curves
+    which are representative of the algorithm's performance
+    """
+    combined = []
+    pooled = []
+    for e1, e2 in zip(results1, results2):
+        h1, h2 = e1['hyperparameters'], e2['hyperparameters']
+        assert h1['lr'] == h2['lr']
+        t1, t2 = e1['trajectory'], e2['trajectory']
+        combined_trajs = {'steps':t1['steps']}
+        pooled_trajs = combined_trajs.copy()
+        for key in t1.keys():
+            if key.startswith(('scoredist', 'kl')):
+                combined_trajs[key] = np.concatenate((t1[key], t2[key]), axis=1)
+                meantraj = (t1[key] + t2[key]) / 2
+                pooled_trajs[key] = np.array([
+                    meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
+                    for i in range(meantraj.shape[1] // bs)
+                ]).T
+        combined += [{'hyperparameters': h1, 'trajectory': combined_trajs}]
+        pooled += [{'hyperparameters': h2, 'trajectory': pooled_trajs}]
+    return combined, pooled
+
+
 def all_plot(guess, dense, results_dir='results', nsteps=None):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
@@ -233,34 +270,14 @@ def all_plot(guess, dense, results_dir='results', nsteps=None):
                         # plot_marginal_likelihoods(results, intervention, k, basefile)
 
         if not guess and 'cause' in allresults and 'effect' in allresults:
-            # now let's combine results from intervention on cause and effect
-            # let's also report statistics about pooled results
-            # do not do it if we guessed the intervention because it's not straightforward
-            combineds = []
-            pooleds = []
-            for e1, e2 in zip(allresults['cause'], allresults['effect']):
-                assert e1['lr'] == e2['lr']
-                combined = e1.copy()
-                pooled = e1.copy()
-                for key in e2.keys():
-                    if key.startswith(('scoredist', 'kl')):
-                        combined[key] = np.concatenate((e1[key], e2[key]), axis=1)
-                        # pooled records the average over 10 cause and 10 effect interventions
-                        # the goal is to have tighter percentile curves
-                        # which are representative of the algorithm's performance
-                        meantraj = (e1[key] + e2[key]) / 2
-                        bs = 5
-                        pooled[key] = np.array([meantraj[:, bs * i:bs * (i + 1)].mean(axis=1)
-                                                for i in range(meantraj.shape[1] // bs)]).T
-                combineds += [combined]
-                pooleds += [pooled]
-            if len(combineds) > 0:
-                two_plots(combineds, nsteps, plotname=f'combined_k={k}', dirname=basefile)
-                two_plots(pooleds, nsteps, plotname=f'pooled_k={k}', dirname=basefile)
+            combined, pooled = merge_results(allresults['cause'], allresults['effect'])
+            if len(combined) > 0:
+                two_plots(combined, nsteps, plotname=f'combined_k={k}', dirname=basefile)
+                two_plots(pooled, nsteps, plotname=f'pooled_k={k}', dirname=basefile)
 
 
 if __name__ == '__main__':
-    all_plot(guess=True, dense=True)
-    all_plot(guess=True, dense=False)
-    # all_plot(guess=False, dense=True)
-    # all_plot(guess=False, dense=False)
+    # all_plot(guess=True, dense=True)
+    # all_plot(guess=True, dense=False)
+    all_plot(guess=False, dense=True)
+    all_plot(guess=False, dense=False)

@@ -246,7 +246,11 @@ def parameter_sweep(k, n, T, bs, prox, intervention, init, seed=1):
         torch.manual_seed(seed)
         parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
         trajectory, models = batch_adaptation(**parameters)
-        results.append({**parameters, **trajectory, 'models': models, 'guess': False})
+        results.append({
+            'hyperparameters': parameters,
+            'trajectory': trajectory,
+            'models': models
+        })
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
