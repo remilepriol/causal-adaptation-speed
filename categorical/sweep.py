@@ -120,7 +120,7 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     for model, item in sorted(bestof.items()):
         if 'scoredist' not in item:
             continue
-        index = np.searchsorted(item['steps'], nsteps)
+        index = min(np.searchsorted(item['steps'], nsteps), len(item['steps'])-1)
 
         initial_distances = item['scoredist'][0]
         end_kl = item['kl'][index]
@@ -208,14 +208,15 @@ def plot_marginal_likelihoods(results, intervention, k, dirname):
     plt.close()
 
 
-def all_plot(guess, dense, results_dir='results'):
+def all_plot(guess, dense, results_dir='results', nsteps=None):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')
 
     for k in [10, 20, 50]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
-        nsteps = k ** 2 // 4
+        if nsteps is None:
+            nsteps = k ** 2 // 4
         allresults = defaultdict(list)
         for intervention in ['cause', 'effect']:
             # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
