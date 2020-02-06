@@ -11,7 +11,7 @@ np.random.seed(1)
 class TestNormals(unittest.TestCase):
 
     def setUp(self):
-        self.nat = normal.sample_natural(dim=3)
+        self.nat = normal.sample_natural(dim=3, mode='conjugate')
         self.cho = normal.sample_cholesky(dim=3)
 
     # change of representation

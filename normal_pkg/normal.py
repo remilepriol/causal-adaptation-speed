@@ -207,8 +207,9 @@ class NaturalConditionalNormal:
     def intervention(self, on):
         """Sample natural parameters of a marginal distribution
         and substitute them in the cause or effect marginals."""
-        eta = np.random.randn(self.etaa.shape[0])
-        prec = wishart(self.etaa.shape[0])
+        dim = self.etaa.shape[0]
+        prec = wishart(dim)
+        eta = np.random.multivariate_normal(np.zeros(dim), prec / 2 / dim)
         if on == 'cause':
             return NaturalConditionalNormal(eta, prec, self.linear, self.bias, self.preccond)
         elif on == 'effect':
@@ -268,24 +269,33 @@ class CholeskyConditionalNormal:
 # |  ___/ '__| |/ _ \| '__/ __|
 # | |   | |  | | (_) | |  \__ \
 # |_|   |_|  |_|\___/|_|  |___/
-def wishart(dim, addfreedom=1):
-    ans = scipy.stats.wishart(df=dim + addfreedom, scale=np.eye(dim)).rvs()
+def wishart(dim, scale=1):
+    ans = scipy.stats.wishart(df=2 * dim + 2, scale=np.eye(dim) / dim * scale).rvs()
     if dim == 1:
         ans = np.array([[ans]])
     return ans
 
 
-def sample_natural(dim):
+def sample_natural(dim, mode, scale=10):
     """Sample natural parameters of a ConditionalGaussian of dimension dim."""
 
-    # parameters of marginal on A
-    etaa = np.random.randn(dim)
-    preca = wishart(dim)
+    if mode == 'naive':
+        # parameters of marginal on A
+        etaa = np.random.randn(dim)
+        preca = wishart(dim)
 
-    # parameters of conditional
-    linear = np.random.randn(dim, dim)
-    bias = np.random.randn(dim)
-    preccond = wishart(dim)
+        # parameters of conditional
+        linear = np.random.randn(dim, dim)
+        bias = np.random.randn(dim)
+        preccond = wishart(dim)
+    elif mode == 'conjugate':
+        n0 = 2 * dim
+        preca = wishart(dim)
+        preccond = wishart(dim, scale)
+
+        etaa = np.random.multivariate_normal(np.zeros(dim), preca / n0)
+        bias = np.random.multivariate_normal(np.zeros(dim), preccond / n0)
+        linear = preccond @ np.random.randn(dim, dim) / np.sqrt(dim) * np.sqrt(1 - 1 / scale)
 
     return NaturalConditionalNormal(etaa, preca, linear, bias, preccond)
 
@@ -310,8 +320,10 @@ def sample_cholesky(dim):
     return CholeskyConditionalNormal(zetaa, lowera, linear, bias, lowercond)
 
 
-def sample(dim, style):
-    if style == 'natural':
-        return sample_natural(dim)
-    elif style == 'cholesky':
+def sample(dim, mode):
+    if mode == 'natural':
+        return sample_natural(dim, mode='conjugate')
+    elif mode == 'naive':
+        return sample_natural(dim, mode=mode)
+    elif mode == 'cholesky':
         return sample_cholesky(dim).to_natural()

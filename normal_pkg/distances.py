@@ -1,6 +1,7 @@
-from collections import defaultdict
 import os
 import pickle
+from collections import defaultdict
+
 from normal_pkg import normal
 
 
@@ -12,7 +13,7 @@ def intervention_distances(k, n, intervention='cause', init='natural'):
     for i in range(n):
         # sample mechanisms
         if init == 'natural':
-            original = normal.sample_natural(k)
+            original = normal.sample_natural(k, 'conjugate')
         elif init == 'cholesky':
             original = normal.sample_cholesky(k).to_natural()
 
@@ -33,11 +34,12 @@ def intervention_distances(k, n, intervention='cause', init='natural'):
 
 def record_distances():
     n = 300
-    kk = [10, 20]
+    kk = [1, 2, 3, 10]
+    kk = [20, 30, 40]
 
     results = []
     for intervention in ['cause', 'effect']:
-        for init in ['natural', 'cholesky']:
+        for init in ['natural']:  # , 'cholesky']:
             for k in kk:
                 exp = {
                     'intervention': intervention,
