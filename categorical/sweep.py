@@ -52,19 +52,17 @@ def get_best(results, nsteps):
     # and each value is a list of this model's hyperparameter
     # and outcome at step nsteps
     for exp in results:
-        relevant_parameters = {
-            key: item for key, item in exp['hyperparameters'].items()
-            if key in ['k', 'lr', 'n0', 'scheduler_exponent']}
-
         trajectory = exp['trajectory']
         for model, metric in value_at_step(trajectory, nsteps).items():
             if model not in by_model:
                 by_model[model] = []
-            toadd = {**relevant_parameters,
-                     'value': metric,
-                     'kl': trajectory['kl_' + model],
-                     'steps': trajectory['steps']
-                     }
+            toadd = {
+                'hyperparameters': exp['hyperparameters'],
+                **exp['hyperparameters'],
+                'value': metric,
+                'kl': trajectory['kl_' + model],
+                'steps': trajectory['steps']
+            }
             if 'scoredist_' + model in trajectory:
                 toadd['scoredist'] = trajectory['scoredist_' + model]
             by_model[model] += [toadd]
@@ -95,7 +93,7 @@ def curve_plot(bestof, nsteps, figsize, confidence=(5, 95), logscale=False):
 
         # truncate plot for k-invariance
         k = item['k']
-        end = np.searchsorted(xx, 2 * nsteps) + 1
+        end = np.searchsorted(xx, 3 * nsteps) + 1
         xx = xx[:end]
         values = values[:end]
 
@@ -117,7 +115,7 @@ def curve_plot(bestof, nsteps, figsize, confidence=(5, 95), logscale=False):
     ax.set_xlabel('number of samples t')
     ax.legend()
 
-    return fig
+    return fig, ax
 
 
 def scatter_plot(bestof, nsteps, figsize, logscale=False):
@@ -151,10 +149,10 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     ax.set_ylabel(f'KL(p^*, p_T={nsteps})')
     # ax.set_xlabel('||transfer - model||^2 at initialization')
     ax.set_xlabel(r'$|| \mathbf{s_0 - s^*} ||^2$')
-    return fig
+    return fig, ax
 
 
-def two_plots(results, nsteps, plotname, dirname):
+def two_plots(results, nsteps, plotname, dirname, verbose=True):
     print(dirname, plotname)
     bestof = get_best(results, nsteps)
     # remove the models I don't want to compare
@@ -168,13 +166,18 @@ def two_plots(results, nsteps, plotname, dirname):
 
     figsize = (6, 3)
     confidence = (5, 95)
-    curves = curve_plot(selected, nsteps, figsize, confidence)
+    curves, ax1 = curve_plot(selected, nsteps, figsize, confidence)
     # initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
     # curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
     #                 f'{initstring},  k={results[0]["k"]}')
+    scatter, ax2 = scatter_plot(selected, nsteps, figsize,
+                                logscale=dirname == 'guess_sparseinit')
 
-    scatter = scatter_plot(selected, nsteps, figsize,
-                           logscale=dirname == 'guess_sparseinit')
+    if verbose:
+        for ax in [ax1, ax2]:
+            info = str(next(iter(selected.values()))['hyperparameters'])
+            ax.text(0.5, 1, info, ha='center', va='center',
+                    wrap=True, transform=ax.transAxes)
 
     # small adjustments for intervention guessing
     if dirname.startswith('guess'):
@@ -230,7 +233,7 @@ def merge_results(results1, results2, bs=5):
         h1, h2 = e1['hyperparameters'], e2['hyperparameters']
         assert h1['lr'] == h2['lr']
         t1, t2 = e1['trajectory'], e2['trajectory']
-        combined_trajs = {'steps':t1['steps']}
+        combined_trajs = {'steps': t1['steps']}
         pooled_trajs = combined_trajs.copy()
         for key in t1.keys():
             if key.startswith(('scoredist', 'kl')):

@@ -7,9 +7,9 @@ from normal_pkg.adaptation import CholeskyModule
 
 
 def learning_curves(results_dir='normal_results'):
-    for k in [3, 4, 10]:
+    for k in [10, 20, 30]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
-        nsteps = 100
+        nsteps = 40
         allresults = defaultdict(list)
         init = 'natural'
         for intervention in ['cause', 'effect']:
@@ -19,7 +19,7 @@ def learning_curves(results_dir='normal_results'):
                 with open(filepath, 'rb') as fin:
                     results = pickle.load(fin)
                     two_plots(results, nsteps, plotname=plotname, dirname='normal')
-                    allresults[intervention] = results
+                    # allresults[intervention] = results
 
 
 if __name__ == "__main__":
