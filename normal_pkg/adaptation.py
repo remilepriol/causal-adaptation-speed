@@ -129,9 +129,11 @@ def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, nograd_
 class AdaptationExperiment:
     """Sample one distribution, adapt and record adaptation speed."""
 
-    def __init__(self, k, T, intervention, init,
-                 lr, batch_size=10, scheduler_exponent=0, use_prox=False,  # optimizer
-                 preccond_scale=10, log_interval=10):
+    def __init__(
+            self, T, log_interval,  # recording
+            k, intervention, init, preccond_scale, intervention_scale,  # distributions
+            lr=.1, batch_size=10, scheduler_exponent=0, use_prox=False,  # optimizer
+    ):
         self.k = k
         self.intervention = intervention
         self.init = init
@@ -141,7 +143,7 @@ class AdaptationExperiment:
         self.use_prox = use_prox
 
         reference = normal.sample(k, init, scale=preccond_scale)
-        transfer = reference.intervention(on=intervention)
+        transfer = reference.intervention(intervention, intervention_scale)
 
         self.deterministic = True if batch_size == 0 else False
         if not self.deterministic:
@@ -232,20 +234,11 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def parameter_sweep(k, n, T, bs, prox, intervention, init,
-                    preccond_scale, seed=1):
-    # print(f'intervention on {intervention} with k={k}, n={n}, T={T} bs={bs}')
+def sweep_lr(base_experiment, seed=1):
     results = []
-    base_experiment = {
-        'k': k, 'n': n, 'T': T, 'batch_size': bs, 'use_prox': prox,
-        'intervention': intervention,
-        'init': init, 'preccond_scale': preccond_scale,
-        'intervention_scale': 1  # between 0 and 1.
-        # Interpolates reference and transfer marginal or mechanism
-    }
-
     print(base_experiment)
-    for lr in [.0001, .001, .01, .1]:
+    # for lr in [.0001, .001, .01, .1]:
+    for lr in [.001, .003, .01, .03, .1]:
         np.random.seed(seed)
         torch.manual_seed(seed)
         parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
@@ -258,7 +251,7 @@ def parameter_sweep(k, n, T, bs, prox, intervention, init,
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
-    savefile = f'{intervention}_{init}_k={k}_{preccond_scale}.pkl'
+    savefile = '{intervention}_{init}_k={k}_{intervention_scale}.pkl'.format(**base_experiment)
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
         pickle.dump(results, fout)
@@ -271,15 +264,15 @@ def test_AdaptationExperiment():
 
 if __name__ == "__main__":
     # test_AdaptationExperiment()
-    n = 10
-    T = 400
-    bs = 1
-    prox = True
-    preccond_scale = 10
-    for k in [20, 30]:
-        parameter_sweep(k, n, T, bs, prox,
-                        intervention='cause', init='natural',
-                        preccond_scale=preccond_scale)
-        parameter_sweep(k, n, T, bs, prox,
-                        intervention='effect', init='natural',
-                        preccond_scale=preccond_scale)
+
+    base = {'n': 10, 'T': 400, 'batch_size': 1, 'use_prox': True, 'log_interval': 10,
+            'init': 'natural', 'preccond_scale': 10}
+    for k in [10]:
+        base['k'] = k
+
+        for scale in [.1, .4, 1]:
+            base['intervention_scale'] = scale
+            sweep_lr({**base, 'intervention': 'cause'})
+            sweep_lr({**base, 'intervention': 'mechanism'})
+
+        sweep_lr({**base, 'intervention': 'effect', 'intervention_scale': 1})
