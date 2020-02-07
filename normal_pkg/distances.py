@@ -1,7 +1,7 @@
 import os
 import pickle
 from collections import defaultdict
-
+import numpy as np
 from normal_pkg import normal
 
 
@@ -33,14 +33,16 @@ def intervention_distances(k, n, intervention='cause', init='natural', interpola
 
 
 def record_distances():
-    n = 300
+    n = 100
     kk = [1, 2, 3, 10]
     kk = [20, 30, 40]
+    kk=[10]
 
     results = []
-    for intervention in ['cause', 'effect']:
+    for intervention in ['cause', 'effect', 'mechanism']:
         for init in ['natural']:  # , 'cholesky']:
             for k in kk:
+                np.random.seed(1)
                 exp = {
                     'intervention': intervention,
                     'init': init,

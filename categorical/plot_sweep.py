@@ -7,6 +7,11 @@ import numpy as np
 
 np.set_printoptions(precision=2)
 
+
+def add_capitals(dico):
+    return {**dico, **{key[0].capitalize() + key[1:]: item for key, item in dico.items()}}
+
+
 COLORS = {
     'causal': 'blue',
     'anti': 'red',
@@ -22,7 +27,12 @@ COLORS = {
     'AntiGuessX': 'salmon',
     'AntiGuessY': 'chocolate',
 }
-COLORS = {**COLORS, **{key[0].capitalize() + key[1:]: item for key, item in COLORS.items()}}
+MARKERS = {key: 'o' for key in COLORS}
+MARKERS['causal'] = '^'
+MARKERS['anti'] = 'v'
+
+COLORS = add_capitals(COLORS)
+MARKERS = add_capitals(MARKERS)
 
 
 def value_at_step(trajectory, nsteps=1000):
@@ -89,7 +99,7 @@ def get_best(results, nsteps):
     return by_model
 
 
-def curve_plot(bestof, nsteps, figsize, logscale=False, confidence=(5, 95)):
+def curve_plot(bestof, nsteps, figsize, logscale=False, endstep=400, confidence=(5, 95)):
     """Draw mean trajectory plot with percentiles"""
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
     for model, item in sorted(bestof.items()):
@@ -97,12 +107,14 @@ def curve_plot(bestof, nsteps, figsize, logscale=False, confidence=(5, 95)):
         values = item['kl']
 
         # truncate plot for k-invariance
-        # end = np.searchsorted(xx, 3 * nsteps) + 1
-        # xx = xx[:end]
-        # values = values[:end]
+        end_id = np.searchsorted(xx, endstep) + 1
+        xx = xx[:end_id]
+        values = values[:end_id]
 
         # plot mean and percentile statistics
-        ax.plot(xx, values.mean(axis=1), label=model, color=COLORS[model], alpha=.9)
+        ax.plot(xx, values.mean(axis=1), label=model,
+                marker=MARKERS[model], markevery=len(xx) // 6, markeredgewidth=0,
+                color=COLORS[model], alpha=.9)
         ax.fill_between(
             xx,
             np.percentile(values, confidence[0], axis=1),
@@ -137,11 +149,13 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
             end_kl,
             alpha=.3,
             color=COLORS[model],
+            marker=MARKERS[model],
+            linewidth=0,
             label=model
         )
         alldist += list(initial_distances)
 
-    ax.legend()
+    # ax.legend()
     ax.grid(True)
     if logscale:
         ax.set_yscale('log')
@@ -152,11 +166,11 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
 
     ax.set_ylabel(f'KL(p^*, p_T={nsteps})')
     # ax.set_xlabel('||transfer - model||^2 at initialization')
-    ax.set_xlabel(r'$|| \mathbf{s_0 - s^*} ||^2$')
+    ax.set_xlabel(r'$||  \theta^{(0)} - \theta^* ||^2$')
     return fig, ax
 
 
-def two_plots(results, nsteps, plotname, dirname, verbose=False):
+def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3)):
     print(dirname, plotname)
     bestof = get_best(results, nsteps)
     # remove the models I don't want to compare
@@ -168,7 +182,6 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False):
     if dirname.startswith('guess'):
         selected.pop('Joint', None)
 
-    figsize = (6, 3)
     curves, ax1 = curve_plot(selected, nsteps, figsize, logscale=True)
     # initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
     # curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
@@ -254,15 +267,14 @@ def merge_results(results1, results2, bs=5):
     return combined, pooled
 
 
-def all_plot(guess, dense, results_dir='results', nsteps=None):
+def all_plot(guess, dense, results_dir='results', figsize=(5, 2.5)):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')
 
     for k in [10, 20, 50]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
-        if nsteps is None:
-            nsteps = k ** 2 // 4
+        nsteps = k ** 2 // 4
         allresults = defaultdict(list)
         for intervention in ['cause', 'effect']:
             # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
@@ -272,7 +284,8 @@ def all_plot(guess, dense, results_dir='results', nsteps=None):
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as fin:
                     results = pickle.load(fin)
-                    two_plots(results, nsteps, plotname=plotname, dirname=basefile)
+                    two_plots(results, nsteps, plotname=plotname, dirname=basefile,
+                              figsize=figsize)
                     allresults[intervention] = results
                     if guess:
                         pass
@@ -281,8 +294,9 @@ def all_plot(guess, dense, results_dir='results', nsteps=None):
         if not guess and 'cause' in allresults and 'effect' in allresults:
             combined, pooled = merge_results(allresults['cause'], allresults['effect'])
             if len(combined) > 0:
-                two_plots(combined, nsteps, plotname=f'combined_k={k}', dirname=basefile)
-                two_plots(pooled, nsteps, plotname=f'pooled_k={k}', dirname=basefile)
+                for key, item in {'combined': combined, 'pooled': pooled}.items():
+                    two_plots(item, nsteps, plotname=f'{key}_k={k}', dirname=basefile,
+                              figsize=figsize)
 
 
 if __name__ == '__main__':

@@ -234,11 +234,12 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def sweep_lr(base_experiment, seed=1):
+def sweep_lr(lrlr, base_experiment, seed=1):
     results = []
     print(base_experiment)
     # for lr in [.0001, .001, .01, .1]:
-    for lr in [.001, .003, .01, .03, .1]:
+    # for lr in [.001, .003, .01, .03, .1]:
+    for lr in lrlr:
         np.random.seed(seed)
         torch.manual_seed(seed)
         parameters = {'lr': lr, 'scheduler_exponent': 0, **base_experiment}
@@ -251,7 +252,7 @@ def sweep_lr(base_experiment, seed=1):
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
-    savefile = '{intervention}_{init}_k={k}_{intervention_scale}.pkl'.format(**base_experiment)
+    savefile = '{intervention}_{init}_k={k}.pkl'.format(**base_experiment)
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
         pickle.dump(results, fout)
@@ -265,14 +266,12 @@ def test_AdaptationExperiment():
 if __name__ == "__main__":
     # test_AdaptationExperiment()
 
-    base = {'n': 10, 'T': 400, 'batch_size': 1, 'use_prox': True, 'log_interval': 10,
+    base = {'n': 100, 'T': 400, 'batch_size': 1, 'use_prox': True,
+            'log_interval': 10, 'intervention_scale': 1,
             'init': 'natural', 'preccond_scale': 10}
+    lrlr=[.03]
     for k in [10]:
         base['k'] = k
-
-        for scale in [.1, .4, 1]:
-            base['intervention_scale'] = scale
-            sweep_lr({**base, 'intervention': 'cause'})
-            sweep_lr({**base, 'intervention': 'mechanism'})
-
-        sweep_lr({**base, 'intervention': 'effect', 'intervention_scale': 1})
+        sweep_lr(lrlr, {**base, 'intervention': 'cause'})
+        sweep_lr(lrlr, {**base, 'intervention': 'effect'})
+        sweep_lr(lrlr, {**base, 'intervention': 'mechanism'})
