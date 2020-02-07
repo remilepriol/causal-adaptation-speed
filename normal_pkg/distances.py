@@ -5,29 +5,29 @@ from collections import defaultdict
 from normal_pkg import normal
 
 
-def intervention_distances(k, n, intervention='cause', init='natural'):
+def intervention_distances(k, n, intervention='cause', init='natural', interpolation=1):
     """Sample  n conditional Gaussians between cause and effect of dimension k
     and evaluate the distance after intervention between causal and anticausal models."""
 
     ans = defaultdict(list)
     for i in range(n):
         # sample mechanisms
-        if init == 'natural':
-            original = normal.sample_natural(k, 'conjugate')
-        elif init == 'cholesky':
-            original = normal.sample_cholesky(k).to_natural()
+        reference = normal.sample(k, init)
 
-        transfer = original.intervention(intervention)
-        ans['causal_nat'] += [original.distance(transfer)]
+        try:
+            interp = interpolation[i]
+        except TypeError:
+            interp = interpolation
 
-        revorig = original.reverse()
+        transfer = reference.intervention(intervention, interp)
+
+        ans['causal_nat'] += [reference.distance(transfer)]
+        revref = reference.reverse()
         revtrans = transfer.reverse()
-        ans['anti_nat'] += [revorig.distance(revtrans)]
-
-        ans['joint_nat'] += [original.to_joint().distance(transfer.to_joint()
-                                                          )]
-        ans['causal_cho'] += [original.to_cholesky().distance(transfer.to_cholesky())]
-        ans['anti_cho'] += [revorig.to_cholesky().distance(revtrans.to_cholesky())]
+        ans['anti_nat'] += [revref.distance(revtrans)]
+        ans['joint_nat'] += [reference.to_joint().distance(transfer.to_joint())]
+        ans['causal_cho'] += [reference.to_cholesky().distance(transfer.to_cholesky())]
+        ans['anti_cho'] += [revref.to_cholesky().distance(revtrans.to_cholesky())]
 
     return ans
 

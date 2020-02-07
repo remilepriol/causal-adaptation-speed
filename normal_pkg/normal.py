@@ -204,17 +204,29 @@ class NaturalConditionalNormal:
             lcond=lcond
         )
 
-    def intervention(self, on):
+    def intervention(self, on, interpolation):
         """Sample natural parameters of a marginal distribution
-        and substitute them in the cause or effect marginals."""
+       Substitute them in the cause or effect marginals.
+        """
         dim = self.etaa.shape[0]
         prec = wishart(dim)
         eta = np.random.multivariate_normal(np.zeros(dim), prec / 2 / dim)
         if on == 'cause':
+            eta = (1 - interpolation) * self.etaa + interpolation * eta
+            prec = (1 - interpolation) * self.preca + interpolation * prec
             return NaturalConditionalNormal(eta, prec, self.linear, self.bias, self.preccond)
         elif on == 'effect':
-            return NaturalConditionalNormal(
-                self.etaa, self.preca, np.zeros_like(self.linear), eta, prec)
+            # linear = (1 - interpolation) * self.linear
+            linear = 0 * self.linear
+            rev = self.reverse()
+            bias = (1 - interpolation) * rev.etaa + interpolation * eta
+            prec = (1 - interpolation) * rev.preca + interpolation * prec
+            return NaturalConditionalNormal(self.etaa, self.preca, linear, bias, prec)
+        elif on == 'mechanism':
+            linear = (self.preccond @ np.random.randn(dim, dim) / np.sqrt(dim) * .95)
+            linear = (1 - interpolation) * self.linear + interpolation * linear
+            bias = (1 - interpolation) * self.bias + interpolation * eta
+            return NaturalConditionalNormal(self.etaa, self.preca, linear, bias, self.preccond)
 
     def reverse(self):
         """Return the ConditionalGaussian from B to A."""
@@ -276,7 +288,7 @@ def wishart(dim, scale=1):
     return ans
 
 
-def sample_natural(dim, mode, scale=10):
+def sample_natural(dim, mode='conjugate', scale=10):
     """Sample natural parameters of a ConditionalGaussian of dimension dim."""
 
     if mode == 'naive':
@@ -285,17 +297,19 @@ def sample_natural(dim, mode, scale=10):
         preca = wishart(dim)
 
         # parameters of conditional
-        linear = np.random.randn(dim, dim)
+        linear = np.random.randn(dim, dim)/ np.sqrt(dim) * .95
         bias = np.random.randn(dim)
-        preccond = wishart(dim)
+        preccond = wishart(dim, scale)
+
     elif mode == 'conjugate':
-        n0 = 2 * dim
+        n0 = 2 * dim + 2
         preca = wishart(dim)
         preccond = wishart(dim, scale)
 
         etaa = np.random.multivariate_normal(np.zeros(dim), preca / n0)
         bias = np.random.multivariate_normal(np.zeros(dim), preccond / n0)
-        linear = preccond @ np.random.randn(dim, dim) / np.sqrt(dim) * np.sqrt(1 - 1 / scale)
+
+        linear = preccond @ np.random.randn(dim, dim) / np.sqrt(dim) * .95
 
     return NaturalConditionalNormal(etaa, preca, linear, bias, preccond)
 
