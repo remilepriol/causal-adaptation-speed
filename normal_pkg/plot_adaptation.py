@@ -2,7 +2,7 @@ import os
 import pickle
 from collections import defaultdict
 
-from categorical.sweep import two_plots
+from categorical.plot_sweep import two_plots
 from normal_pkg.adaptation import CholeskyModule
 
 
