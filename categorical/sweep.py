@@ -69,7 +69,12 @@ def get_best(results, nsteps):
 
     # select only the best hyperparameters for this model.
     for model, metrics in by_model.items():
-        by_model[model] = sorted(metrics, key=lambda x: x['value'])[0]
+        dalist = sorted(metrics, key=lambda x: x['value'])
+        # Ensure that the optimal configuration does not diverge as optimization goes on.
+        for duh in dalist:
+            if duh['kl'][0].mean() * 2 > duh['kl'][-1].mean():
+                break
+        by_model[model] = duh
 
     # print the outcome
     for model, item in by_model.items():
@@ -84,7 +89,7 @@ def get_best(results, nsteps):
     return by_model
 
 
-def curve_plot(bestof, nsteps, figsize, confidence=(5, 95), logscale=False):
+def curve_plot(bestof, nsteps, figsize, logscale=False, confidence=(5, 95)):
     """Draw mean trajectory plot with percentiles"""
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
     for model, item in sorted(bestof.items()):
@@ -92,10 +97,9 @@ def curve_plot(bestof, nsteps, figsize, confidence=(5, 95), logscale=False):
         values = item['kl']
 
         # truncate plot for k-invariance
-        k = item['k']
-        end = np.searchsorted(xx, 3 * nsteps) + 1
-        xx = xx[:end]
-        values = values[:end]
+        # end = np.searchsorted(xx, 3 * nsteps) + 1
+        # xx = xx[:end]
+        # values = values[:end]
 
         # plot mean and percentile statistics
         ax.plot(xx, values.mean(axis=1), label=model, color=COLORS[model], alpha=.9)
@@ -152,7 +156,7 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     return fig, ax
 
 
-def two_plots(results, nsteps, plotname, dirname, verbose=True):
+def two_plots(results, nsteps, plotname, dirname, verbose=False):
     print(dirname, plotname)
     bestof = get_best(results, nsteps)
     # remove the models I don't want to compare
@@ -165,8 +169,7 @@ def two_plots(results, nsteps, plotname, dirname, verbose=True):
         selected.pop('Joint', None)
 
     figsize = (6, 3)
-    confidence = (5, 95)
-    curves, ax1 = curve_plot(selected, nsteps, figsize, confidence)
+    curves, ax1 = curve_plot(selected, nsteps, figsize, logscale=True)
     # initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
     # curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
     #                 f'{initstring},  k={results[0]["k"]}')
@@ -176,8 +179,11 @@ def two_plots(results, nsteps, plotname, dirname, verbose=True):
     if verbose:
         for ax in [ax1, ax2]:
             info = str(next(iter(selected.values()))['hyperparameters'])
-            ax.text(0.5, 1, info, ha='center', va='center',
-                    wrap=True, transform=ax.transAxes)
+            txt = ax.text(0.5, 1, info, ha='center', va='top',
+                          wrap=True, transform=ax.transAxes,
+                          # bbox=dict(boxstyle='square')
+                          )
+            txt._get_wrap_line_width = lambda: 400.  # wrap to 600 screen pixels
 
     # small adjustments for intervention guessing
     if dirname.startswith('guess'):
