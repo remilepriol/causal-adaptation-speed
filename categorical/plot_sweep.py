@@ -4,6 +4,7 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.stats
 
 np.set_printoptions(precision=2)
 
@@ -137,6 +138,7 @@ def curve_plot(bestof, nsteps, figsize, logscale=False, endstep=400, confidence=
 def scatter_plot(bestof, nsteps, figsize, logscale=False):
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
     alldist = []
+    allkl = []
     for model, item in sorted(bestof.items()):
         if 'scoredist' not in item:
             continue
@@ -151,11 +153,26 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
             color=COLORS[model],
             marker=MARKERS[model],
             linewidth=0,
-            label=model
+            label=model if False else None
         )
         alldist += list(initial_distances)
+        allkl += list(end_kl)
 
-    # ax.legend()
+    # linear regression
+    slope, intercept, rval, pval, _ = scipy.stats.linregress(alldist, allkl)
+    # slope, _, _, _ = np.linalg.lstsq(np.array([alldist]).T, allkl, rcond=None)
+    # slope = slope[0]
+    # intercept = 0
+    x_vals = np.array(ax.get_xlim())
+    y_vals = intercept + slope * x_vals
+    ax.plot(
+        x_vals, y_vals, '--', color='black', alpha=.8,
+        label=f'y=ax, r2={rval ** 2:.2f}'
+              f',\na={slope:.1e}, b={intercept:.2f}'
+    )
+
+    # look
+    ax.legend()
     ax.grid(True)
     if logscale:
         ax.set_yscale('log')

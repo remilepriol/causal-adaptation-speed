@@ -110,12 +110,7 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False):
 if __name__ == "__main__":
     # optimize_distances()
     guess = False
-    for init_dense in [False]:
+    for init_dense in [True, False]:
         for k in [20]:
             parameter_sweep('cause', k, init_dense, guess=guess)
             parameter_sweep('effect', k, init_dense, guess=guess)
-            # parameter_sweep('gmechanism', k, init_dense)
-            # parameter_sweep('mechanism', k, init_dense)
-            # parameter_sweep('geometric', k, init_dense)
-            # parameter_sweep('weightedgeo', k, init_dense)
-            # parameter_sweep('independent', k, init_dense)
