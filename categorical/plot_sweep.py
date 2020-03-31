@@ -160,9 +160,6 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
 
     # linear regression
     slope, intercept, rval, pval, _ = scipy.stats.linregress(alldist, allkl)
-    # slope, _, _, _ = np.linalg.lstsq(np.array([alldist]).T, allkl, rcond=None)
-    # slope = slope[0]
-    # intercept = 0
     x_vals = np.array(ax.get_xlim())
     y_vals = intercept + slope * x_vals
     ax.plot(
@@ -182,7 +179,6 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0, 0), useMathText=True)
 
     ax.set_ylabel(f'KL(p^*, p_T={nsteps})')
-    # ax.set_xlabel('||transfer - model||^2 at initialization')
     ax.set_xlabel(r'$||  \theta^{(0)} - \theta^* ||^2$')
     return fig, ax
 
