@@ -153,6 +153,19 @@ class CategoricalStatic:
             sba = np.random.normal(self.sba, self.sba.std())
             sba -= sba.mean(axis=2, keepdims=True)
             return CategoricalStatic(self.sa, sba, from_probas=False)
+        elif on=='singlecond':
+            newscores = stats.loggamma.rvs(concentration, size=(self.n, self.k))
+            newscores -= newscores.mean(1, keepdims=True)
+            # if 'simple':
+            #     a0 = 0
+            # elif 'max':  # TODO
+            #     a0 = np.argmax(self.sa, axis=1)
+            #     a0 = np.random.choice()
+
+            a0 = np.argmax(self.sa, axis=1)
+            sba = self.sba.copy()
+            sba[np.arange(self.n), a0] = newscores
+            return CategoricalStatic(self.sa, sba, from_probas=False)
         else:
             raise ValueError(f'Intervention on {on} is not supported.')
 
@@ -492,7 +505,9 @@ def experiment_guess(
     accuracy of guessing the intervention based on the lowest KL.
     """
     causalstatic = sample_joint(k, n, concentration, is_init_dense)
-    transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
+    transferstatic = causalstatic.intervention(
+        on=intervention,
+        concentration=concentration if is_init_dense else concentration/k)
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
 

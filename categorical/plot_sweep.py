@@ -164,7 +164,7 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     y_vals = intercept + slope * x_vals
     ax.plot(
         x_vals, y_vals, '--', color='black', alpha=.8,
-        label=f'y=ax, r2={rval ** 2:.2f}'
+        label=f'y=ax+b, r2={rval ** 2:.2f}'
               f',\na={slope:.1e}, b={intercept:.2f}'
     )
 
@@ -289,7 +289,8 @@ def all_plot(guess, dense, results_dir='results', figsize=(5, 2.5)):
         # Optimize hyperparameters for nsteps such that curves are k-invariant
         nsteps = k ** 2 // 4
         allresults = defaultdict(list)
-        for intervention in ['cause', 'effect']:
+        for intervention in ['singlecond']:
+        # for intervention in ['cause', 'effect']:
             # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
             plotname = f'{intervention}_k={k}'
             file = basefile + '_' + plotname + '.pkl'

@@ -111,6 +111,8 @@ if __name__ == "__main__":
     # optimize_distances()
     guess = False
     for init_dense in [True, False]:
-        for k in [20]:
-            parameter_sweep('cause', k, init_dense, guess=guess)
-            parameter_sweep('effect', k, init_dense, guess=guess)
+        for k in [10]:
+            pass
+            # parameter_sweep('cause', k, init_dense, guess=guess)
+            # parameter_sweep('effect', k, init_dense, guess=guess)
+            parameter_sweep('singlecond', k, init_dense)
