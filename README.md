@@ -1,22 +1,22 @@
 # An Analysis of the Adaptation Speed of Causal Models
-Code to reproduce results.
+Code to reproduce results of the paper.
+Dependencies are indicated in `environment.yaml`.
 
 ### Categorical
-To get categorical plots run 
+To get categorical adaptation plots run 
 ```
-python categorical/script_experiments.py
-python categorical/plot_sweep.py
+python main.py categorical adaptation
+python main.py categorical plot
 ```
 
 ### Normal
 To get scatter plots of distance: anti vs causal  run
 ```
-python normal_pkg/distances.py
-python normal_pkg/plot_distances.py
+python main.py normal distance
 ```
 
 To get adaptation results run
 ```
-python normal_pkg/adaptation.py
-python normal_pkg/plot_adaptation.py
+python main.py normal adaptation
+python main.py normal plot
 ```
