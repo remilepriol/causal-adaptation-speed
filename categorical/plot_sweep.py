@@ -220,6 +220,7 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
 
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
         for figpath in [os.path.join('plots', dirname, style, f'{style}_{plotname}.pdf')]:
+            print("Saving ", figpath)
             os.makedirs(os.path.dirname(figpath), exist_ok=True)
             # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
             fig.savefig(figpath, bbox_inches='tight')
@@ -280,7 +281,7 @@ def merge_results(results1, results2, bs=5):
     return combined, pooled
 
 
-def all_plot(guess, dense, results_dir='results', figsize=(3.6, 2.2)):
+def all_plot(guess=False, dense=True, results_dir='results', figsize=(3.6, 2.2)):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')

@@ -1,7 +1,9 @@
 import os
 import pickle
 from collections import defaultdict
+
 import numpy as np
+
 from normal_pkg import normal
 
 
@@ -34,9 +36,9 @@ def intervention_distances(k, n, intervention='cause', init='natural', interpola
 
 def record_distances():
     n = 100
-    kk = [1, 2, 3, 10]
-    kk = [20, 30, 40]
-    kk=[10]
+    # kk = [1, 2, 3, 10]
+    # kk = [20, 30, 40]
+    kk = [10]
 
     results = []
     for intervention in ['cause', 'effect', 'mechanism']:
@@ -48,15 +50,15 @@ def record_distances():
                     'init': init,
                     'dim': k,
                 }
-                print(exp)
+                print('Recording distances for ', exp)
                 exp = {**exp, 'distances': intervention_distances(k, n, intervention, init)}
                 results.append(exp)
 
     savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
-
-    with open(os.path.join(
-            savedir, f'distances_{n}.pkl'), 'wb') as fout:
+    savefile = os.path.join(savedir, f'distances_{n}.pkl')
+    print("Saving results in ", savefile)
+    with open(savefile, 'wb') as fout:
         pickle.dump(results, fout)
 
 

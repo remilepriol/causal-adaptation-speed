@@ -108,7 +108,7 @@ class CholeskyModule(nn.Module):
 def cholesky_kl(p0: CholeskyModule, p1: CholeskyModule, decompose=False, nograd_logdet=False):
     z0, L0 = p0.joint_parameters()
     z1, L1 = p1.joint_parameters()
-    V, _ = torch.trtrs(L1, L0, upper=False)
+    V, _ = torch.triangular_solve(L1, L0, upper=False)
     diff = V @ z0 - z1
     vecnorm = .5 * torch.sum(diff ** 2)
     matnorm = .5 * (torch.sum(V ** 2) - z0.shape[0])
@@ -237,8 +237,6 @@ def batch_adaptation(n, T, **parameters):
 def sweep_lr(lrlr, base_experiment, seed=1):
     results = []
     print(base_experiment)
-    # for lr in [.0001, .001, .01, .1]:
-    # for lr in [.001, .003, .01, .03, .1]:
     for lr in lrlr:
         np.random.seed(seed)
         torch.manual_seed(seed)
