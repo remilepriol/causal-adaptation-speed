@@ -5,9 +5,8 @@ import numpy as np
 
 from categorical import distances1
 
-SAVEDIR = 'categorical_results'
 
-def all_distances():
+def all_distances(savedir='categorical_results'):
     n = 300
     kk = np.arange(2, 100, 8)
 
@@ -29,10 +28,10 @@ def all_distances():
                 }
                 results.append(exp)
 
-    os.makedirs(SAVEDIR, exist_ok=True)
+    os.makedirs(savedir, exist_ok=True)
 
     with open(os.path.join(
-            SAVEDIR, f'categorical_distances_{n}.pkl'), 'wb') as fout:
+            savedir, f'categorical_distances_{n}.pkl'), 'wb') as fout:
         pickle.dump(results, fout)
 
 
@@ -63,7 +62,7 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k, init, seed=17, guess=False):
+def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir ='categorical_results'):
     print(f'intervention on {intervention} with k={k}')
     results = []
     base_experiment = {
@@ -89,7 +88,7 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False):
                 'guess': guess
             })
 
-    os.makedirs(SAVEDIR, exist_ok=True)
+    os.makedirs(savedir, exist_ok=True)
 
     savefile = f'{intervention}_k={k}.pkl'
     if base_experiment['is_init_dense']:
@@ -101,7 +100,7 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False):
     else:
         savefile = 'sweep2_' + savefile
 
-    savepath = os.path.join(SAVEDIR, savefile)
+    savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
         pickle.dump(results, fout)
 

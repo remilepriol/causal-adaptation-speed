@@ -34,7 +34,7 @@ def intervention_distances(k, n, intervention='cause', init='natural', interpola
     return ans
 
 
-def record_distances():
+def record_distances(savedir = 'normal_results'):
     n = 100
     # kk = [1, 2, 3, 10]
     # kk = [20, 30, 40]
@@ -54,7 +54,6 @@ def record_distances():
                 exp = {**exp, 'distances': intervention_distances(k, n, intervention, init)}
                 results.append(exp)
 
-    savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
     savefile = os.path.join(savedir, f'distances_{n}.pkl')
     print("Saving results in ", savefile)

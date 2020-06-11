@@ -1,9 +1,8 @@
 import argparse
 
 import categorical
-from categorical import script_experiments,plot_sweep,plot_old
+from categorical import plot_sweep, script_experiments
 from normal_pkg import adaptation, distances, plot_adaptation, plot_distances
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -14,24 +13,27 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.distribution == 'categorical':
+        results_dir = 'categorical_results'
         if args.action == 'distance':
-            categorical.script_experiments.all_distances()
-            categorical.plot_old.dist_plot()
+            # categorical.script_experiments.all_distances(savedir=results_dir)
+            raise DeprecationWarning("Categorical distances does not work.")
 
         elif args.action == 'adaptation':
             for init_dense in [True, False]:
                 for k in [20]:
                     for intervention in ['cause', 'effect', 'singlecond']:
-                        categorical.script_experiments.parameter_sweep(intervention, k, init_dense)
+                        categorical.script_experiments.parameter_sweep(
+                            intervention, k, init_dense, savedir=results_dir)
 
         elif args.action == 'plot':
             for dense in [True, False]:
-                categorical.plot_sweep.all_plot(dense=dense, results_dir='categorical_results')
+                categorical.plot_sweep.all_plot(dense=dense, results_dir=results_dir)
 
     elif args.distribution == 'normal':
+        results_dir = 'normal_results'
         if args.action == 'distance':
             print("Measuring distances")
-            distances.record_distances()
+            distances.record_distances(savedir=results_dir)
             plot_distances.all_distances()
 
         elif args.action == 'adaptation':
@@ -45,7 +47,7 @@ if __name__ == "__main__":
                 base_hparams['k'] = k
                 for intervention in ['cause', 'effect']:
                     hparams = {**base_hparams, 'k': k, 'intervention': intervention}
-                    adaptation.sweep_lr(lrlr, hparams)
+                    adaptation.sweep_lr(lrlr, hparams, savedir=results_dir)
 
         elif args.action == 'plot':
-            plot_adaptation.learning_curves()
+            plot_adaptation.learning_curves(results_dir=results_dir)

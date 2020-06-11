@@ -234,7 +234,7 @@ def batch_adaptation(n, T, **parameters):
     return trajectories, models
 
 
-def sweep_lr(lrlr, base_experiment, seed=1):
+def sweep_lr(lrlr, base_experiment, seed=1, savedir='normal_results'):
     results = []
     print(base_experiment)
     for lr in lrlr:
@@ -248,11 +248,11 @@ def sweep_lr(lrlr, base_experiment, seed=1):
             'models': models
         })
 
-    savedir = 'normal_results'
     os.makedirs(savedir, exist_ok=True)
     savefile = '{intervention}_{init}_k={k}.pkl'.format(**base_experiment)
     savepath = os.path.join(savedir, savefile)
     with open(savepath, 'wb') as fout:
+        print("Saving results in ", savepath)
         pickle.dump(results, fout)
 
 

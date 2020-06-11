@@ -12,18 +12,17 @@ def abline(ax, slope, intercept):
     ax.plot(x_vals, y_vals, '--', color='grey')
 
 
-def all_distances():
-    with open('normal_results/distances_100.pkl', 'rb') as fin:
+def all_distances(results_dir='normal_results', plotdir='plots/normal_distances/'):
+    with open(os.path.join(results_dir, 'distances_100.pkl'), 'rb') as fin:
         results = pickle.load(fin)
 
-    plotdir = 'plots/normal_distances/'
     os.makedirs(plotdir, exist_ok=True)
 
     for exp in results:
         for unit in ['nat', 'cho']:
             name = "dist{unit}_{intervention}_{init}_k={dim}.pdf".format(unit=unit, **exp)
             savefile = os.path.join(plotdir, name)
-            print("Saving in ", savefile)
+            print("Saving in plots ", savefile)
             scatter_distances(unit, exp)
             plt.tight_layout()
             plt.savefig(savefile)
