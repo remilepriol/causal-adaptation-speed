@@ -1,5 +1,5 @@
 # An Analysis of the Adaptation Speed of Causal Models
-Code to reproduce results for ICML submission
+Code to reproduce results.
 
 ### Categorical
 To get categorical plot run 
