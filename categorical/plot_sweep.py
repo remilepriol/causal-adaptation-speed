@@ -128,7 +128,7 @@ def curve_plot(bestof, nsteps, figsize, logscale=False, endstep=400, confidence=
     ax.grid(True)
     if logscale:
         ax.set_yscale('log')
-    ax.set_ylabel('$KL(p^*, p_t)$')
+    ax.set_ylabel('$KL(p^*, p^{(t)})$')
     ax.set_xlabel('number of samples t')
     ax.legend()
 
@@ -178,8 +178,8 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     else:
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0, 0), useMathText=True)
 
-    ax.set_ylabel(f'KL(p^*, p_T={nsteps})')
-    ax.set_xlabel(r'$||  \theta^{(0)} - \theta^* ||^2$')
+    ax.set_ylabel(r'$KL(p^*, p^{(T)}); T=$' + str(nsteps))
+    ax.set_xlabel(r'$||\theta^{(0)} - \theta^* ||^2$')
     return fig, ax
 
 
@@ -195,12 +195,12 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
     if dirname.startswith('guess'):
         selected.pop('Joint', None)
 
-    curves, ax1 = curve_plot(selected, nsteps, figsize, logscale=True)
+    curves, ax1 = curve_plot(selected, nsteps, figsize, logscale=False)
     # initstring = 'denseinit' if results[0]["is_init_dense"] else 'sparseinit'
     # curves.suptitle(f'Average KL tuned for {nsteps} samples with {confidence} percentiles, '
     #                 f'{initstring},  k={results[0]["k"]}')
     scatter, ax2 = scatter_plot(selected, nsteps, figsize,
-                                logscale=dirname == 'guess_sparseinit')
+                                logscale=(dirname == 'guess_sparseinit'))
 
     if verbose:
         for ax in [ax1, ax2]:
@@ -280,17 +280,16 @@ def merge_results(results1, results2, bs=5):
     return combined, pooled
 
 
-def all_plot(guess, dense, results_dir='results', figsize=(5, 2.5)):
+def all_plot(guess, dense, results_dir='results', figsize=(3.6, 2.2)):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')
 
-    for k in [10, 20, 50]:
+    for k in [20]:  # [10, 20, 50]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
         nsteps = k ** 2 // 4
         allresults = defaultdict(list)
-        for intervention in ['singlecond']:
-        # for intervention in ['cause', 'effect']:
+        for intervention in ['singlecond', 'cause', 'effect']:
             # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
             plotname = f'{intervention}_k={k}'
             file = basefile + '_' + plotname + '.pkl'

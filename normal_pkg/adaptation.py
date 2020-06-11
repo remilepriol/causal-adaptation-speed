@@ -269,7 +269,7 @@ if __name__ == "__main__":
     base = {'n': 100, 'T': 400, 'batch_size': 1, 'use_prox': True,
             'log_interval': 10, 'intervention_scale': 1,
             'init': 'natural', 'preccond_scale': 10}
-    lrlr=[.03]
+    lrlr = [.03]
     for k in [10]:
         base['k'] = k
         sweep_lr(lrlr, {**base, 'intervention': 'cause'})
