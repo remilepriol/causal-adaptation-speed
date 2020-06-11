@@ -2,7 +2,7 @@
 Code to reproduce results.
 
 ### Categorical
-To get categorical plot run 
+To get categorical plots run 
 ```
 python categorical/script_experiments.py
 python categorical/plot_sweep.py
