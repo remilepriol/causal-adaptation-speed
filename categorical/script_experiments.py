@@ -3,36 +3,7 @@ import pickle
 
 import numpy as np
 
-from categorical import distances1
-
-
-def all_distances(savedir='categorical_results'):
-    n = 300
-    kk = np.arange(2, 100, 8)
-
-    results = []
-    for intervention in ['cause', 'effect']:
-        for dense_init in [True, False]:
-            for concentration in [0.1, 1, 10]:
-                distances = []
-                for k in kk:
-                    distances.append(distances1.experiment(
-                        k, n, 1, intervention, dense_init
-                    ))
-                exp = {
-                    'intervention': intervention,
-                    'dense_init': dense_init,
-                    'concentration': concentration,
-                    'dimensions': kk,
-                    'distances': np.array(distances)
-                }
-                results.append(exp)
-
-    os.makedirs(savedir, exist_ok=True)
-
-    with open(os.path.join(
-            savedir, f'categorical_distances_{n}.pkl'), 'wb') as fout:
-        pickle.dump(results, fout)
+from categorical.experiment_loops import experiment_optimize, experiment_guess
 
 
 def optimize_distances(k=10):
@@ -44,7 +15,7 @@ def optimize_distances(k=10):
     }
     # for lr in [0.01, 0.05, 0.1]:
     for lr in [0.01, 0.1, .5]:
-        trajectory = distances1.experiment_optimize(
+        trajectory = experiment_optimize(
             lr=lr, **base_experiment)
         experiment = {**base_experiment, 'lr': lr, **trajectory}
         results.append(experiment)
@@ -62,7 +33,7 @@ def optimize_distances(k=10):
         pickle.dump(previous_results + results, fout)
 
 
-def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir ='categorical_results'):
+def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir='categorical_results'):
     print(f'intervention on {intervention} with k={k}')
     results = []
     base_experiment = {
@@ -79,9 +50,9 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir ='categ
             np.random.seed(seed)
             parameters = {'lr': lr, 'scheduler_exponent': exponent, **base_experiment}
             if guess:
-                trajectory = distances1.experiment_guess(**parameters)
+                trajectory = experiment_guess(**parameters)
             else:
-                trajectory = distances1.experiment_optimize(**parameters)
+                trajectory = experiment_optimize(**parameters)
             results.append({
                 'hyperparameters': parameters,
                 'trajectory': trajectory,
