@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 
-from categorical.distances1 import sample_joint
+from categorical.models import sample_joint
 
 
 def intervention_distances(k, n, concentration, intervention, dense_init=True):

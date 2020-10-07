@@ -6,7 +6,7 @@ import tqdm
 from torch import optim
 
 from averaging_manager import AveragedModel
-from categorical.distances1 import sample_joint, JointModule, JointMAP, init_mle, CategoricalModule
+from categorical.models import sample_joint, JointModule, JointMAP, init_mle, CategoricalModule
 
 
 def experiment_optimize(k, n, T, lr, intervention,
