@@ -6,7 +6,7 @@ import tqdm
 from torch import optim
 
 from averaging_manager import AveragedModel
-from categorical.models import sample_joint, JointModule, JointMAP, init_mle, CategoricalModule
+from categorical.models import CategoricalModule, JointMAP, JointModule, sample_joint
 
 
 def experiment_optimize(k, n, T, lr, intervention,
@@ -42,8 +42,8 @@ def experiment_optimize(k, n, T, lr, intervention,
     optimizers = [causaloptimizer, antioptimizer, jointoptimizer]
 
     # MAP
-    countestimator = JointMAP(n, k)
-    priorestimator = init_mle(n0, causalstatic)
+    countestimator = JointMAP(np.ones([n, k, k]))
+    priorestimator = JointMAP(n0 * causalstatic.to_joint(return_probas=True))
 
     steps = []
     ans = defaultdict(list)
@@ -89,13 +89,14 @@ def experiment_optimize(k, n, T, lr, intervention,
             antiloss = antitransfer.kullback_leibler(anticausal).sum()
             jointloss = jointtransfer.kullback_leibler(joint).sum()
         else:
-            aa, bb = transferstatic.sample(m=batch_size, return_tensor=True)
-            causalloss = - causal(aa, bb).sum() / batch_size
-            antiloss = - anticausal(aa, bb).sum() / batch_size
-            jointloss = - joint(aa, bb).sum() / batch_size
+            aa, bb = transferstatic.sample(m=batch_size)
             if use_map:
                 countestimator.update(aa, bb)
                 priorestimator.update(aa, bb)
+            taa, tbb = torch.from_numpy(aa), torch.from_numpy(bb)
+            causalloss = - causal(taa, tbb).sum() / batch_size
+            antiloss = - anticausal(taa, tbb).sum() / batch_size
+            jointloss = - joint(taa, tbb).sum() / batch_size
 
         for loss, opt in zip([causalloss, antiloss, jointloss], optimizers):
             loss.backward()
@@ -111,7 +112,7 @@ def test_experiment_optimize():
     for intervention in ['cause', 'effect', 'gmechanism']:
         experiment_optimize(
             k=2, n=3, T=6, lr=.1, batch_size=4, log_interval=1,
-            intervention=intervention
+            intervention=intervention, use_map=True
         )
 
 
@@ -132,7 +133,7 @@ def experiment_guess(
     causalstatic = sample_joint(k, n, concentration, is_init_dense)
     transferstatic = causalstatic.intervention(
         on=intervention,
-        concentration=concentration if is_init_dense else concentration/k)
+        concentration=concentration if is_init_dense else concentration / k)
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
 
@@ -217,6 +218,7 @@ def test_experiment_guess():
                 k=5, n=10, T=6, lr=.1, batch_size=bs, log_interval=1,
                 intervention=intervention
             )
+
 
 if __name__ == "__main__":
     test_experiment_optimize()
