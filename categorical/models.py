@@ -329,31 +329,38 @@ class JointModule(nn.Module):
 
 class JointMAP:
 
-    def __init__(self, n, k):
-        self.counts = torch.ones((n, k, k))
+    def __init__(self, counts):
+        self.counts = counts
+        self.n, self.k, self.k2 = counts.shape
 
     @property
     def total(self):
-        return self.counts.sum(dim=(1, 2))
+        return self.counts.sum(axis=(1, 2))
 
     @property
     def frequencies(self):
-        return self.counts / self.total.unsqueeze(1).unsqueeze(2)
+        return self.counts / self.total[:, None, None]
 
     def update(self, a, b):
-        rows = torch.arange(0, len(a)).unsqueeze(1).repeat(1, a.shape[1])
-        self.counts[rows.view(-1), a.view(-1), b.view(-1)] += 1
+        assert len(a) == self.n
+        for i, (aa, bb) in enumerate(zip(a, b)):
+            for aaa, bbb in zip(aa, bb):
+                self.counts[i, aaa, bbb] += 1
 
     def to_joint(self):
-        return torch.log(self.frequencies)
+        return np.log(self.frequencies)
 
 
-def init_mle(n0: int, static: CategoricalStatic):
-    mle = JointMAP(static.n, static.k)
-    mle.counts = n0 * torch.from_numpy(static.to_joint(return_probas=True))
-    return mle
+def test_JointMAP():
+    j = JointMAP(np.zeros([1, 2, 2]))
+    j.update(np.array([[0, 0, 0, 1]]), np.array([[0, 0, 1, 1]]))
+    print(j.total)
+    print(j.frequencies)
+    assert j.total == 4
+    assert np.allclose(j.frequencies, [[.5, .25], [0, .25]])
 
 
 if __name__ == "__main__":
     test_ConditionalStatic()
     test_CategoricalModule()
+    test_JointMAP()
