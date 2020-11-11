@@ -6,7 +6,7 @@ import tqdm
 from torch import optim
 
 from averaging_manager import AveragedModel
-from categorical.models import CategoricalModule, JointMAP, JointModule, sample_joint
+from categorical.models import CategoricalModule, JointMAP, JointModule, sample_joint, Counter
 
 
 def experiment_optimize(k, n, T, lr, intervention,
@@ -25,6 +25,7 @@ def experiment_optimize(k, n, T, lr, intervention,
     """
     causalstatic = sample_joint(k, n, concentration, is_init_dense)
     transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
+    # MODULES
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
 
@@ -34,6 +35,7 @@ def experiment_optimize(k, n, T, lr, intervention,
     joint = JointModule(causal.to_joint().detach().view(n, -1))
     jointtransfer = JointModule(transfer.to_joint().detach().view(n, -1))
 
+    # Optimizers
     optkwargs = {'lr': lr, 'lambd': 0, 'alpha': 0, 't0': 0,
                  'weight_decay': 0}
     causaloptimizer = optim.ASGD(causal.parameters(), **optkwargs)
@@ -42,8 +44,9 @@ def experiment_optimize(k, n, T, lr, intervention,
     optimizers = [causaloptimizer, antioptimizer, jointoptimizer]
 
     # MAP
-    countestimator = JointMAP(np.ones([n, k, k]))
-    priorestimator = JointMAP(n0 * causalstatic.to_joint(return_probas=True))
+    counter = Counter(np.zeros([n, k, k]))
+    smooth_MLE = JointMAP(np.ones([n, k, k]), counter)
+    joint_MAP = JointMAP(n0 * causalstatic.to_joint(return_probas=True), counter)
 
     steps = []
     ans = defaultdict(list)
@@ -75,9 +78,9 @@ def experiment_optimize(k, n, T, lr, intervention,
                 # MAP
                 if use_map:
                     ans['kl_MAP_uniform'].append(
-                        transfer.kullback_leibler(countestimator))
+                        transfer.kullback_leibler(smooth_MLE))
                     ans['kl_MAP_source'].append(
-                        transfer.kullback_leibler(priorestimator))
+                        transfer.kullback_leibler(joint_MAP))
 
         # UPDATE
         for opt in optimizers:
@@ -91,8 +94,7 @@ def experiment_optimize(k, n, T, lr, intervention,
         else:
             aa, bb = transferstatic.sample(m=batch_size)
             if use_map:
-                countestimator.update(aa, bb)
-                priorestimator.update(aa, bb)
+                counter.update(aa, bb)
             taa, tbb = torch.from_numpy(aa), torch.from_numpy(bb)
             causalloss = - causal(taa, tbb).sum() / batch_size
             antiloss = - anticausal(taa, tbb).sum() / batch_size

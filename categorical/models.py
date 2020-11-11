@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from numba import jit
 from scipy import stats
 from torch import nn, optim
 
@@ -327,7 +328,7 @@ class JointModule(nn.Module):
         return f"CategoricalJoint(logits={self.logits.detach()})"
 
 
-class JointMAP:
+class Counter:
 
     def __init__(self, counts):
         self.counts = counts
@@ -335,32 +336,38 @@ class JointMAP:
 
     @property
     def total(self):
-        return self.counts.sum(axis=(1, 2))
+        return self.counts.sum(axis=(1, 2), keepdims=True)
+
+    # @jit
+    def update(self, a: np.ndarray, b: np.ndarray):
+        for aaa, bbb in zip(a.T, b.T):
+            self.counts[np.arange(self.n), aaa, bbb] += 1
+
+def test_Counter():
+    c = Counter(np.zeros([1, 2, 2]))
+    c.update(np.array([[0, 0, 0, 1]]), np.array([[0, 0, 1, 1]]))
+    assert c.total == 4
+    assert np.allclose(c.counts/c.total, [[.5, .25], [0, .25]])
+
+
+class JointMAP:
+
+    def __init__(self, prior, counter):
+        self.prior = prior
+        self.n0 = self.prior.sum(axis=(1, 2), keepdims=True)
+        self.counter = counter
 
     @property
     def frequencies(self):
-        return self.counts / self.total[:, None, None]
-
-    def update(self, a, b):
-        assert len(a) == self.n
-        for i, (aa, bb) in enumerate(zip(a, b)):
-            for aaa, bbb in zip(aa, bb):
-                self.counts[i, aaa, bbb] += 1
+        return ((self.prior + self.counter.counts) /
+                (self.n0 + self.counter.total))
 
     def to_joint(self):
         return np.log(self.frequencies)
 
 
-def test_JointMAP():
-    j = JointMAP(np.zeros([1, 2, 2]))
-    j.update(np.array([[0, 0, 0, 1]]), np.array([[0, 0, 1, 1]]))
-    print(j.total)
-    print(j.frequencies)
-    assert j.total == 4
-    assert np.allclose(j.frequencies, [[.5, .25], [0, .25]])
-
-
 if __name__ == "__main__":
+    print("hi")
     test_ConditionalStatic()
     test_CategoricalModule()
-    test_JointMAP()
+    test_Counter()
