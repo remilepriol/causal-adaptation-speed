@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 
-from categorical.experiment_loops import experiment_optimize, experiment_guess
+from categorical.experiment_loops import experiment_guess, experiment_optimize
 
 
 def optimize_distances(k=10):
@@ -41,12 +41,12 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir='catego
         'batch_size': 1,
         'intervention': intervention,
         'is_init_dense': init,
-        'concentration': 1
+        'concentration': 1,
+        'use_map': True
     }
-    if not guess:
-        base_experiment = {'n0': 1, 'use_map': False, **base_experiment}
     for exponent in [0]:
-        for lr in [.03, .1, .3, 1, 3, 9, 30]:
+        for lr, n0 in zip([.03, .1, .3, 1, 3, 9, 30],
+                          [0.3, 1, 3, 10, 30, 90, 200]):
             np.random.seed(seed)
             parameters = {'lr': lr, 'scheduler_exponent': exponent, **base_experiment}
             if guess:
