@@ -189,9 +189,11 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
     # remove the models I don't want to compare
     # eg remove SGD, MAP. Keep ASGD and rename them to remove average.
     selected = {
-        key[0].capitalize() + key[1:-len('_average')].replace('A', 'X').replace('B', 'Y'): item for
-        key, item in bestof.items()
+        key[0].capitalize() + key[1:-len('_average')].replace('A', 'X').replace('B', 'Y'): item
+        for key, item in bestof.items()
         if key.endswith('_average')}
+    for key in ['MAP_uniform', 'MAP_source']:
+        selected[key] = bestof[key]
     if dirname.startswith('guess'):
         selected.pop('Joint', None)
 
@@ -281,7 +283,7 @@ def merge_results(results1, results2, bs=5):
     return combined, pooled
 
 
-def all_plot(guess=False, dense=True, results_dir='results', figsize=(3.6, 2.2)):
+def all_plot(guess=False, dense=True, results_dir='categorical_results', figsize=(3.6, 2.2)):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')

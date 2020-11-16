@@ -48,7 +48,7 @@ def parameter_sweep(intervention, k, init, seed=17, guess=False, savedir='catego
         for lr, n0 in zip([.03, .1, .3, 1, 3, 9, 30],
                           [0.3, 1, 3, 10, 30, 90, 200]):
             np.random.seed(seed)
-            parameters = {'lr': lr, 'scheduler_exponent': exponent, **base_experiment}
+            parameters = {'n0': n0, 'lr': lr, 'scheduler_exponent': exponent, **base_experiment}
             if guess:
                 trajectory = experiment_guess(**parameters)
             else:
