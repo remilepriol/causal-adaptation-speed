@@ -13,7 +13,7 @@ def intervention_distances(k, n, concentration, intervention, dense_init=True):
     """
     # causal parameters
     causal = sample_joint(k, n, concentration, dense_init)
-    transfer = causal.intervention(on=intervention, concentration=concentration)
+    transfer = causal.intervention(on=intervention, concentration=concentration, dense=dense_init)
     cpd, csd = causal.sqdistance(transfer)
 
     # anticausal parameters
@@ -37,9 +37,9 @@ def all_distances(savedir='categorical_results'):
     kk = np.arange(2, 100, 8)
 
     results = []
-    for intervention in ['cause', 'effect']:
+    for intervention in ['cause', 'effect', 'mechanism', 'gmechanism']:
         for dense_init in [True, False]:
-            for concentration in [0.1, 1, 10]:
+            for concentration in [1]:
                 distances = []
                 for k in kk:
                     distances.append(intervention_distances(
@@ -63,3 +63,4 @@ def all_distances(savedir='categorical_results'):
 
 if __name__ == "__main__":
     test_intervention_distances()
+    all_distances()

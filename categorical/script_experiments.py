@@ -80,6 +80,7 @@ if __name__ == "__main__":
     guess = False
     for init_dense in [True, False]:
         for k in [20]:
-            parameter_sweep('cause', k, init_dense, guess=guess)
-            parameter_sweep('effect', k, init_dense, guess=guess)
-            parameter_sweep('singlecond', k, init_dense)
+            # parameter_sweep('cause', k, init_dense, guess=guess)
+            # parameter_sweep('effect', k, init_dense, guess=guess)
+            # parameter_sweep('singlecond', k, init_dense)
+            parameter_sweep('gmechanism', k, init_dense)

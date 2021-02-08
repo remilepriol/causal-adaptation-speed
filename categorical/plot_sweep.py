@@ -193,7 +193,8 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
         for key, item in bestof.items()
         if key.endswith('_average')}
     for key in ['MAP_uniform', 'MAP_source']:
-        selected[key] = bestof[key]
+        # selected[key] = bestof[key]
+        pass
     if dirname.startswith('guess'):
         selected.pop('Joint', None)
 
@@ -292,8 +293,8 @@ def all_plot(guess=False, dense=True, results_dir='categorical_results', figsize
         # Optimize hyperparameters for nsteps such that curves are k-invariant
         nsteps = k ** 2 // 4
         allresults = defaultdict(list)
-        for intervention in ['singlecond', 'cause', 'effect']:
-            # , 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
+        for intervention in ['singlecond', 'cause', 'effect', 'gmechanism']:
+            # , 'independent', 'geometric', 'weightedgeo']:
             plotname = f'{intervention}_k={k}'
             file = basefile + '_' + plotname + '.pkl'
             filepath = os.path.join(results_dir, file)

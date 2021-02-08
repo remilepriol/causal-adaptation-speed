@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from numba import jit
 from scipy import stats
 from torch import nn, optim
 
@@ -31,13 +30,15 @@ def sample_joint(k, n, concentration=1, dense=False, logits=True):
     """
     if logits:
         sa = stats.loggamma.rvs(concentration, size=(n, k))
-        if dense:
-            sba = stats.loggamma.rvs(concentration, size=(n, k, k))
-        else:
-            # use the fact that a loggamma is well approximated by a negative exponential
-            # for small values of the shape parameter with the transformation scale = 1/ shape
-            sba = - stats.expon.rvs(scale=k / concentration, size=(n, k, k))
         sa -= sa.mean(axis=1, keepdims=True)
+
+        conditional_concentration = concentration if dense else concentration / k
+        if conditional_concentration > 0.1:
+            sba = stats.loggamma.rvs(conditional_concentration, size=(n, k, k))
+        else:
+            # A loggamma with small shape parameter is well approximated
+            # by a negative exponential with parameter scale = 1/ shape
+            sba = - stats.expon.rvs(scale=1 / conditional_concentration, size=(n, k, k))
         sba -= sba.mean(axis=2, keepdims=True)
         return CategoricalStatic(sa, sba, from_probas=False)
     else:
@@ -110,7 +111,7 @@ class CategoricalStatic:
         p1 = other.to_joint().reshape(self.n, self.k ** 2)
         return kullback_leibler(p0, p1)
 
-    def intervention(self, on, concentration=1):
+    def intervention(self, on, concentration=1, dense=True):
         # sample new marginal
         if on == 'independent':
             # make cause and effect independent,
@@ -132,18 +133,8 @@ class CategoricalStatic:
             newconditional = np.repeat(newmarginal[:, None, :], self.k, axis=1)
             return CategoricalStatic(self.marginal, newconditional)
         elif on == 'mechanism':
-            # TODO THIS IS WRONG AND UNSTABLE
-            # sample from a dirichlet centered on each conditional
-            sba = np.zeros_like(self.sba)  # in logits space
-            for i in range(self.n):
-                for j in range(self.k):
-                    for k in range(self.k):
-                        p = self.conditional[i, j, k]
-                        if p < 1e-10:  # small
-                            sba[i, j, k] = - stats.expon.rvs(scale=1 / p)
-                        else:
-                            sba[i, j, k] = stats.loggamma.rvs(p)
-            sba -= sba.mean(axis=2, keepdims=True)
+            # sample a new mechanism from the same prior
+            sba = sample_joint(self.k, self.n, concentration, dense, logits=True).sba
             return CategoricalStatic(self.sa, sba, from_probas=False)
         elif on == 'gmechanism':
             # sample from a gaussian centered on each conditional
@@ -155,10 +146,7 @@ class CategoricalStatic:
             newscores -= newscores.mean(1, keepdims=True)
             # if 'simple':
             #     a0 = 0
-            # elif 'max':  # TODO
-            #     a0 = np.argmax(self.sa, axis=1)
-            #     a0 = np.random.choice()
-
+            # elif 'max':
             a0 = np.argmax(self.sa, axis=1)
             sba = self.sba.copy()
             sba[np.arange(self.n), a0] = newscores
@@ -343,11 +331,12 @@ class Counter:
         for aaa, bbb in zip(a.T, b.T):
             self.counts[np.arange(self.n), aaa, bbb] += 1
 
+
 def test_Counter():
     c = Counter(np.zeros([1, 2, 2]))
     c.update(np.array([[0, 0, 0, 1]]), np.array([[0, 0, 1, 1]]))
     assert c.total == 4
-    assert np.allclose(c.counts/c.total, [[.5, .25], [0, .25]])
+    assert np.allclose(c.counts / c.total, [[.5, .25], [0, .25]])
 
 
 class JointMAP:

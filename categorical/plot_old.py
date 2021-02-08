@@ -3,19 +3,20 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tqdm
 
 
 def dist_plot():
-    with open('results/categorical_distances.pkl', 'rb') as fin:
+    with open('categorical_results/categorical_distances_300.pkl', 'rb') as fin:
         results = pickle.load(fin)
 
-    plotdir = 'plots/categorical'
+    plotdir = 'plots/distances'
     os.makedirs(plotdir, exist_ok=True)
 
-    for exp in tqdm.tqdm(results):
+    for exp in results:
+        name = bigplotname(exp)
+        print(name)
         bigplot(exp)
-        plt.savefig(os.path.join(plotdir, bigplotname(exp)))
+        plt.savefig(os.path.join(plotdir, name))
         plt.close()
 
 
@@ -29,22 +30,38 @@ def bigplot(exp, confidence=(5, 95)):
 
     fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(16, 20))
 
+    csname = r'$\|\theta_\rightarrow^0 -  theta_\rightarrow^*\| $'
+    cpname = r'$\|p_\rightarrow^0 -  p_\rightarrow^*\| $'
+    asname = r'$\|\theta_\leftarrow^0 -  theta_\leftarrow^*\| $'
+    apname = r'$\|p_\leftarrow^0 -  p_\leftarrow^*\| $'
+
     axs[0, 0].set_title('causal score vs proba')
     axs[0, 1].set_title('anticausal score vs proba')
     axs[1, 0].set_title('proba anticausal vs causal')
     axs[1, 1].set_title('score anticausal vs causal')
-    axs[2, 0].set_title('proba ratio anticausal / causal ')
-    axs[2, 0].set_title('score ratio anticausal / causal ')
 
     for k, cpd, apd, csd, asd in zip(
             dimensions,
             causal_proba, anti_proba,
             causal_score, anti_score):
         axs[0, 0].scatter(cpd, csd, label=k, alpha=.2)
+        axs[0, 0].set_xlabel(cpname)
+        axs[0, 0].set_ylabel(csname)
         axs[0, 1].scatter(apd, asd, label=k, alpha=.2)
+        axs[0, 1].set_xlabel(apname)
+        axs[0, 1].set_ylabel(asname)
         axs[1, 0].scatter(cpd, apd, label=k, alpha=.2)
+        axs[1, 0].set_xlabel(cpname)
+        axs[1, 0].set_ylabel(apname)
         axs[1, 1].scatter(csd, asd, label=k, alpha=.2)
+        axs[1, 1].set_xlabel(csname)
+        axs[1, 1].set_ylabel(asname)
 
+    abline(axs[1, 0], 1, 0)
+    abline(axs[1, 1], 1, 0)
+
+    axs[2, 0].set_title('proba ratio anticausal / causal ')
+    axs[2, 1].set_title('score ratio anticausal / causal ')
     ratio_proba = anti_proba / causal_proba
     ratio_score = anti_score / causal_score
 
@@ -55,6 +72,8 @@ def bigplot(exp, confidence=(5, 95)):
                         np.percentile(ratio, confidence[1], axis=-1),
                         alpha=.4, label='confidence {} %'.format(
                 confidence[1] - confidence[0]))
+        abline(ax, 0, 1)
+        ax.set_xlabel('k')
 
     for ax in axs.flatten():
         ax.legend()
@@ -63,12 +82,17 @@ def bigplot(exp, confidence=(5, 95)):
 
 
 def bigplotname(exp):
-    return "{}_{}_{}_{}.pdf".format(
+    return "{}_{}.pdf".format(
         exp['intervention'],
-        exp['concentration'],
-        exp['symmetric_init'],
-        exp['symmetric_intervention']
+        'dense' if exp['dense_init'] else 'sparse',
     )
+
+
+def abline(ax, slope, intercept):
+    """Plot a line from slope and intercept"""
+    x_vals = np.array(ax.get_xlim())
+    y_vals = intercept + slope * x_vals
+    ax.plot(x_vals, y_vals, '--', color='grey')
 
 
 COLORS = {
@@ -253,4 +277,4 @@ def optim_scatter(exp, end_step=1000):
 
 
 if __name__ == "__main__":
-    optim_plot()
+    dist_plot()

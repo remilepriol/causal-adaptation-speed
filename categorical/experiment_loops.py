@@ -6,7 +6,7 @@ import tqdm
 from torch import optim
 
 from averaging_manager import AveragedModel
-from categorical.models import CategoricalModule, JointMAP, JointModule, sample_joint, Counter
+from categorical.models import CategoricalModule, Counter, JointMAP, JointModule, sample_joint
 
 
 def experiment_optimize(k, n, T, lr, intervention,
@@ -24,7 +24,11 @@ def experiment_optimize(k, n, T, lr, intervention,
     and distance in scores for causal and anticausal directions.
     """
     causalstatic = sample_joint(k, n, concentration, is_init_dense)
-    transferstatic = causalstatic.intervention(on=intervention, concentration=concentration)
+    transferstatic = causalstatic.intervention(
+        on=intervention,
+        concentration=concentration,
+        dense=is_init_dense
+    )
     # MODULES
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
@@ -135,7 +139,9 @@ def experiment_guess(
     causalstatic = sample_joint(k, n, concentration, is_init_dense)
     transferstatic = causalstatic.intervention(
         on=intervention,
-        concentration=concentration if is_init_dense else concentration / k)
+        concentration=concentration,
+        dense=is_init_dense
+    )
     causal = causalstatic.to_module()
     transfer = transferstatic.to_module()
 
