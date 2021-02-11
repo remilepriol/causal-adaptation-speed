@@ -1,6 +1,6 @@
 import os
 import pickle
-
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -44,4 +44,7 @@ def scatter_distances(unit, exp, alpha=.5):
 
 
 if __name__ == "__main__":
+    matplotlib.use('pgf')
+    matplotlib.rcParams['mathtext.fontset'] = 'cm'
+    matplotlib.rcParams['pdf.fonttype'] = 42
     all_distances()

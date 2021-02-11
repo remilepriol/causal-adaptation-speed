@@ -7,10 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
-np.set_printoptions(precision=2)
-matplotlib.use('pgf')
-matplotlib.rcParams['mathtext.fontset'] = 'cm'
-
 
 def add_capitals(dico):
     return {**dico, **{key[0].capitalize() + key[1:]: item for key, item in dico.items()}}
@@ -225,14 +221,12 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
             fig.axes[0].set_ylabel('')
 
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
-        for fonttype in [42]:
-            matplotlib.rcParams['pdf.fonttype'] = fonttype
-            for figpath in [
-                os.path.join('plots', dirname + str(fonttype), f'{style}_{plotname}.pdf')]:
-                print("Saving ", figpath)
-                os.makedirs(os.path.dirname(figpath), exist_ok=True)
-                # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
-                fig.savefig(figpath, bbox_inches='tight')
+        for figpath in [
+            os.path.join('plots', dirname, f'{style}_{plotname}.pdf')]:
+            print("Saving ", figpath)
+            os.makedirs(os.path.dirname(figpath), exist_ok=True)
+            # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
+            fig.savefig(figpath, bbox_inches='tight')
     plt.close(curves)
     plt.close(scatter)
     print()
@@ -332,6 +326,11 @@ def all_plot(guess=False, dense=True,
 
 
 if __name__ == '__main__':
+    np.set_printoptions(precision=2)
+    matplotlib.use('pgf')
+    matplotlib.rcParams['mathtext.fontset'] = 'cm'
+    matplotlib.rcParams['pdf.fonttype'] = 42
+
     # all_plot(guess=True, dense=True)
     # all_plot(guess=True, dense=False)
     all_plot(guess=False, dense=True)
