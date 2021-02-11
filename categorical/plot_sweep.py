@@ -2,11 +2,14 @@ import os
 import pickle
 from collections import defaultdict
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
 np.set_printoptions(precision=2)
+matplotlib.use('pgf')
+matplotlib.rcParams['mathtext.fontset'] = 'cm'
 
 
 def add_capitals(dico):
@@ -128,7 +131,7 @@ def curve_plot(bestof, nsteps, figsize, logscale=False, endstep=400, confidence=
     ax.grid(True)
     if logscale:
         ax.set_yscale('log')
-    ax.set_ylabel('$KL(p^*, p^{(t)})$')
+    ax.set_ylabel(r'$\mathrm{KL}(\mathbf{p}^*, \mathbf{p}^{(t)})$')
     ax.set_xlabel('number of samples t')
     ax.legend()
 
@@ -178,7 +181,7 @@ def scatter_plot(bestof, nsteps, figsize, logscale=False):
     else:
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0, 0), useMathText=True)
 
-    ax.set_ylabel(r'$KL(p^*, p^{(T)}); T=$' + str(nsteps))
+    ax.set_ylabel(r'$\mathrm{KL}(\mathbf{p}^*, \mathbf{p}^{(t)}); T=$' + str(nsteps))
     ax.set_xlabel(r'$||\theta^{(0)} - \theta^* ||^2$')
     return fig, ax
 
@@ -222,11 +225,14 @@ def two_plots(results, nsteps, plotname, dirname, verbose=False, figsize=(6, 3))
             fig.axes[0].set_ylabel('')
 
     for style, fig in {'curves': curves, 'scatter': scatter}.items():
-        for figpath in [os.path.join('plots', dirname, style, f'{style}_{plotname}.pdf')]:
-            print("Saving ", figpath)
-            os.makedirs(os.path.dirname(figpath), exist_ok=True)
-            # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
-            fig.savefig(figpath, bbox_inches='tight')
+        for fonttype in [42]:
+            matplotlib.rcParams['pdf.fonttype'] = fonttype
+            for figpath in [
+                os.path.join('plots', dirname + str(fonttype), f'{style}_{plotname}.pdf')]:
+                print("Saving ", figpath)
+                os.makedirs(os.path.dirname(figpath), exist_ok=True)
+                # os.path.join('plots/sweep/png', f'{style}_{plotname}.png')]:
+                fig.savefig(figpath, bbox_inches='tight')
     plt.close(curves)
     plt.close(scatter)
     print()
@@ -284,36 +290,45 @@ def merge_results(results1, results2, bs=5):
     return combined, pooled
 
 
-def all_plot(guess=False, dense=True, results_dir='categorical_results', figsize=(3.6, 2.2)):
+def all_plot(guess=False, dense=True,
+             input_dir='categorical_results', output_dir='camera_ready',
+             figsize=(3.6, 2.2)):
     basefile = '_'.join(['guess' if guess else 'sweep2',
                          'denseinit' if dense else 'sparseinit'])
     print(basefile, '\n---------------------')
+
+    prior_string = 'dense' if dense else 'sparse'
 
     for k in [20]:  # [10, 20, 50]:
         # Optimize hyperparameters for nsteps such that curves are k-invariant
         nsteps = k ** 2 // 4
         allresults = defaultdict(list)
-        for intervention in ['singlecond', 'cause', 'effect', 'gmechanism']:
-            # , 'independent', 'geometric', 'weightedgeo']:
-            plotname = f'{intervention}_k={k}'
-            file = basefile + '_' + plotname + '.pkl'
-            filepath = os.path.join(results_dir, file)
+        for intervention in ['cause', 'effect']:
+            # 'singlecond', 'gmechanism', 'independent', 'geometric', 'weightedgeo']:
+            plotname = f'{prior_string}_{intervention}_k={k}'
+            file = f'{basefile}_{intervention}_k={k}.pkl'
+            filepath = os.path.join(input_dir, file)
+            print(os.path.abspath(filepath))
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as fin:
                     results = pickle.load(fin)
-                    two_plots(results, nsteps, plotname=plotname, dirname=basefile,
+                    print(1)
+                    two_plots(results, nsteps,
+                              plotname=plotname,
+                              dirname=output_dir,
                               figsize=figsize)
                     allresults[intervention] = results
-                    if guess:
-                        pass
-                        # plot_marginal_likelihoods(results, intervention, k, basefile)
+                    # if guess:
+                    #     plot_marginal_likelihoods(results, intervention, k, basefile)
 
-        if not guess and 'cause' in allresults and 'effect' in allresults:
-            combined, pooled = merge_results(allresults['cause'], allresults['effect'])
-            if len(combined) > 0:
-                for key, item in {'combined': combined, 'pooled': pooled}.items():
-                    two_plots(item, nsteps, plotname=f'{key}_k={k}', dirname=basefile,
-                              figsize=figsize)
+        # if not guess and 'cause' in allresults and 'effect' in allresults:
+        #     combined, pooled = merge_results(allresults['cause'], allresults['effect'])
+        #     if len(combined) > 0:
+        #         for key, item in {'combined': combined, 'pooled': pooled}.items():
+        #             two_plots(item, nsteps,
+        #                       plotname=f'{prior_string}_{key}_k={k}',
+        #                       dirname=output_dir,
+        #                       figsize=figsize)
 
 
 if __name__ == '__main__':

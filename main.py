@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
         elif args.action == 'plot':
             for dense in [True, False]:
-                categorical.plot_sweep.all_plot(dense=dense, results_dir=results_dir)
+                categorical.plot_sweep.all_plot(dense=dense, input_dir=results_dir)
 
     elif args.distribution == 'normal':
         results_dir = 'normal_results'
